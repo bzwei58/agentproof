@@ -71,6 +71,63 @@ class CLITest(unittest.TestCase):
         self.assertEqual(self.cli('restore', ident, '--apply')[0], 0)
         self.assertTrue(self.file.exists())
 
+    def test_restore_parent_file_conflict_leaves_workspace_unchanged(self):
+        folder = self.root / 'z-module'
+        folder.mkdir()
+        nested = folder / 'worker.py'
+        nested.write_text('original module')
+        ident = self.init()
+        self.file.write_text('keep unrelated local changes')
+        nested.unlink()
+        folder.rmdir()
+        folder.write_text('directory replaced by a file')
+        before = self.state()['checkpoints']
+
+        code, output = self.cli('restore', ident, '--apply')
+
+        self.assertEqual(code, 2)
+        self.assertEqual(self.file.read_text(), 'keep unrelated local changes')
+        self.assertEqual(folder.read_text(), 'directory replaced by a file')
+        self.assertIn('z-module', output)
+        self.assertEqual(self.state()['checkpoints'], before)
+        self.assertEqual(self.cli('restore', ident)[0], 2)
+
+    def test_restore_ancestor_file_conflict_leaves_workspace_unchanged(self):
+        folder = self.root / 'z-module'
+        nested = folder / 'submodule' / 'worker.py'
+        nested.parent.mkdir(parents=True)
+        nested.write_text('original module')
+        ident = self.init()
+        self.file.write_text('keep unrelated local changes')
+        nested.unlink()
+        nested.parent.rmdir()
+        folder.rmdir()
+        folder.write_text('directory replaced by a file')
+        before = self.state()['checkpoints']
+
+        code, output = self.cli('restore', ident, '--apply')
+
+        self.assertEqual(code, 2)
+        self.assertEqual(self.file.read_text(), 'keep unrelated local changes')
+        self.assertEqual(folder.read_text(), 'directory replaced by a file')
+        self.assertIn('z-module', output)
+        self.assertEqual(self.state()['checkpoints'], before)
+        self.assertEqual(self.cli('restore', ident)[0], 2)
+
+    def test_restore_recreates_missing_parent_directories(self):
+        nested = self.root / 'module' / 'submodule' / 'worker.py'
+        nested.parent.mkdir(parents=True)
+        nested.write_text('original module')
+        ident = self.init()
+        nested.unlink()
+        nested.parent.rmdir()
+        nested.parent.parent.rmdir()
+
+        self.assertEqual(self.cli('restore', ident)[0], 0)
+        self.assertFalse(nested.parent.exists())
+        self.assertEqual(self.cli('restore', ident, '--apply')[0], 0)
+        self.assertEqual(nested.read_text(), 'original module')
+
     def test_restore_refuses_to_overwrite_file_not_in_backup_scope(self):
         extra = self.root / 'initial.txt'
         extra.write_text('initial')

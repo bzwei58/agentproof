@@ -88,8 +88,10 @@ After an interrupted process, inspect and remove a stale `.agentproof/lock` manu
 
 Restore rewrites files present in the target snapshot. **Files added later remain**; this is
 file recovery, not an exact whole-workspace rollback. It leaves Git history and staging alone.
-It rejects symlink paths and verifies snapshot content hashes before writing. Restore does
-not recover excluded files or delete newly created ones. A pre-restore checkpoint lets you
+It rejects symlink paths, verifies snapshot content hashes and preflights file/directory
+conflicts, including blocked parent paths, before changing files.
+It is not a filesystem transaction; concurrent changes or I/O errors can still interrupt writes.
+Restore does not recover excluded files or delete newly created ones. A pre-restore checkpoint lets you
 recover overwritten captured content. Do not manually edit snapshot manifests or files.
 
 ## Development

@@ -305,6 +305,11 @@ def run(args, root):
                 raise ValueError(f"Corrupted snapshot file: {name}")
             if target.exists() and not target.is_file():
                 raise ValueError(f"Restore conflicts with directory: {name}")
+            for parent in target.parents:
+                if parent == root:
+                    break
+                if parent.exists() and not parent.is_dir():
+                    raise ValueError(f"Restore path blocked by non-directory: {parent.relative_to(root)}")
             if (not target.exists() or hashlib.sha256(target.read_bytes()).hexdigest() != info["sha256"]
                     or target.stat().st_mode & 0o777 != info["mode"]):
                 pending.append((name, data, info["mode"]))
