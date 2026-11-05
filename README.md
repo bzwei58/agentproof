@@ -50,7 +50,9 @@ that repository's root. One active task is supported per checkout; use a worktre
 
 `verify --timeout 60 -- COMMAND ...` sets a timeout in seconds (default 300).
 A nonzero command result returns CLI exit code 1; usage/operational errors return 2.
-Command stdout and stderr are retained in `.agentproof/checks/`. They are not reprinted.
+Command stdout and stderr are retained in `.agentproof/checks/`. On failure, the terminal
+also shows the last 12 lines, capped at 4,000 characters, plus an explicit timeout message
+when applicable. Successful commands stay quiet. The full log is always retained locally.
 
 ## What is recorded
 
@@ -59,6 +61,8 @@ Command stdout and stderr are retained in `.agentproof/checks/`. They are not re
 - Actual verification command, exit status, output log and before/after fingerprints.
 - Whether each check still matches the current captured files. Editing code after a check
   or having a check modify files marks it **STALE**.
+- Long or multiline commands have compact report summaries; expand **Full command** to
+  inspect the exact recorded invocation.
 - Optional Claude Code JSONL counts: tool calls, error results, compaction boundaries,
   truncation markers and malformed records. Raw imported messages are not copied.
 
