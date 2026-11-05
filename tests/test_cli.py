@@ -104,6 +104,39 @@ class CLITest(unittest.TestCase):
         self.assertEqual(self.cli('verify', '--', 'agentproof-nonexistent-command')[0], 1)
         self.assertEqual(self.state()['checks'][-1]['exit_code'], 127)
 
+    def test_failed_command_shows_bounded_tail_and_retains_full_log(self):
+        self.init()
+        code, output = self.cli('verify', '--', sys.executable, '-c',
+                                'print("START_OF_LOG"); print("x" * 20000); '
+                                'print("actionable failure detail"); raise SystemExit(3)')
+        self.assertEqual(code, 1)
+        self.assertIn('actionable failure detail', output)
+        self.assertNotIn('START_OF_LOG', output)
+        self.assertLess(len(output), 4500)
+        full_log = (self.root / self.state()['checks'][-1]['log']).read_text()
+        self.assertIn('START_OF_LOG', full_log)
+        self.assertGreater(len(full_log), 20000)
+
+    def test_successful_command_stays_quiet(self):
+        self.init()
+        code, output = self.cli('verify', '--', sys.executable, '-c', 'print("QUIET_SUCCESS")')
+        self.assertEqual(code, 0)
+        self.assertNotIn('QUIET_SUCCESS', output)
+        self.assertIn('QUIET_SUCCESS', (self.root / self.state()['checks'][-1]['log']).read_text())
+
+    def test_timeout_is_explained_in_terminal(self):
+        self.init()
+        code, output = self.cli('verify', '--timeout', '0.05', '--', sys.executable,
+                                '-c', 'import time; time.sleep(10)')
+        self.assertEqual(code, 1)
+        self.assertIn('Timed out after 0.05s', output)
+
+    def test_missing_executable_error_is_visible(self):
+        self.init()
+        code, output = self.cli('verify', '--', 'agentproof-nonexistent-command')
+        self.assertEqual(code, 1)
+        self.assertIn('agentproof-nonexistent-command', output)
+
     def test_import_partial_jsonl_without_storing_messages(self):
         self.init()
         fixture = self.root / '.agentproof/session.jsonl'
@@ -164,6 +197,18 @@ class CLITest(unittest.TestCase):
         content = (self.root / '.agentproof/report.md').read_text()
         self.assertIn('No verification commands recorded', content)
         self.assertIn('does not certify correctness', content)
+
+    def test_report_compacts_multiline_commands_without_losing_evidence(self):
+        self.init()
+        script = 'print("ok")\n# ' + ('long command ' * 30) + '```'
+        self.assertEqual(self.cli('verify', '--', sys.executable, '-c', script)[0], 0)
+        self.assertEqual(self.cli('report')[0], 0)
+        content = (self.root / '.agentproof/report.md').read_text()
+        summary = next(line for line in content.splitlines() if line.startswith('- **PASS**'))
+        self.assertLess(len(summary), 300)
+        self.assertIn('<summary>Full command</summary>', content)
+        self.assertIn(self.state()['checks'][-1]['command'], content)
+        self.assertIn('````sh', content)
 
 
 if __name__ == '__main__':

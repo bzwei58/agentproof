@@ -167,11 +167,21 @@ def report(root, state):
     for check in state["checks"]:
         fresh = check["before"] == check["after"] == current_fp
         status = "PASS" if check["exit_code"] == 0 else "FAIL"
-        lines += [f"- **{status}** `{check['command']}` — exit {check['exit_code']}; "
+        command = check["command"]
+        preview = " ".join(command.split())
+        expanded = "\n" in command or len(preview) > 120
+        if len(preview) > 120:
+            preview = preview[:117] + "..."
+        ticks = "`" * (max((len(x) for x in re.findall(r"`+", preview)), default=0) + 1)
+        lines += [f"- **{status}** {ticks} {preview} {ticks} — exit {check['exit_code']}; "
                   f"{'matches current captured files' if fresh else 'STALE / files changed'}; "
                   f"log: `{check['log']}`"]
         if check.get("timed_out"):
             lines += ["  Timed out; the process group was terminated."]
+        if expanded:
+            fence = "`" * max(3, max((len(x) for x in re.findall(r"`+", command)), default=0) + 1)
+            lines += ["", "<details>", "<summary>Full command</summary>", "",
+                      fence + "sh", command, fence, "", "</details>", ""]
     lines += ["", "## Imported session signals", ""]
     for session in state["sessions"]:
         lines += ["- " + "; ".join(f"{k}: {v}" for k, v in session["metrics"].items())]
@@ -189,6 +199,21 @@ def report(root, state):
     lines += ["", "## Checkpoints", ""]
     lines += [f"- `{s['id']}` — {s['label']} ({s['time']})" for s in state["checkpoints"]]
     return "\n".join(lines) + "\n"
+
+
+def log_tail(path):
+    """Bound memory and terminal output even when a check writes a huge log."""
+    with path.open("rb") as source:
+        size = source.seek(0, os.SEEK_END)
+        source.seek(max(0, size - 8192))
+        text = source.read(8192).decode("utf-8", errors="replace")
+    lines = text.splitlines()
+    tail = "\n".join(lines[-12:])
+    truncated = size > 8192 or len(lines) > 12 or len(tail) > 4000
+    tail = tail[-4000:]
+    # Do not emit terminal control sequences from command output.
+    tail = "".join(c for c in tail if c in "\n\t" or (ord(c) >= 32 and ord(c) != 127))
+    return ("[earlier output omitted]\n" if truncated else "") + (tail or "(no command output)")
 
 
 def run(args, root):
@@ -255,6 +280,11 @@ def run(args, root):
                                 "log": str(log), "timed_out": timed_out})
         save(store / "task.json", state)
         print(f"{'PASS' if code == 0 else 'FAIL'} (exit {code}). Log: {log}")
+        if code != 0:
+            if timed_out:
+                print(f"Timed out after {args.timeout:g}s; the process group was terminated.")
+            print("Last command output:")
+            print(log_tail(root / log))
         return 0 if code == 0 else 1
     elif args.action in ("report", "status"):
         result = report(root, state)
