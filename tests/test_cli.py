@@ -1,0 +1,170 @@
+import contextlib
+import io
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+import unittest
+
+from agentproof.cli import main, safe_path
+
+
+class CLITest(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name).resolve()
+        subprocess.run(['git', 'init', '-q', str(self.root)], check=True)
+        self.file = self.root / 'app.py'
+        self.file.write_text('print("start")\n')
+        subprocess.run(['git', '-C', str(self.root), 'add', 'app.py'], check=True)
+        self.cwd = Path.cwd()
+        os.chdir(self.root)
+
+    def tearDown(self):
+        os.chdir(self.cwd)
+        self.temp.cleanup()
+
+    def cli(self, *args):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
+            code = main(list(args))
+        return code, out.getvalue()
+
+    def init(self):
+        self.assertEqual(self.cli('init', '--goal', 'Fix payments')[0], 0)
+        return self.state()['checkpoints'][0]['id']
+
+    def state(self):
+        return json.loads((self.root / '.agentproof/task.json').read_text())
+
+    def test_baseline_preserves_initial_uncommitted_edits(self):
+        self.file.write_text('existing user edit')
+        ident = self.init()
+        self.assertEqual((self.root / f'.agentproof/snapshots/{ident}/files/app.py').read_text(),
+                         'existing user edit')
+        self.assertEqual(self.cli('init', '--goal', 'again')[0], 2)
+
+    def test_evidence_is_git_ignored(self):
+        self.init()
+        status = subprocess.check_output(['git', 'status', '--porcelain']).decode()
+        self.assertNotIn('.agentproof', status)
+
+    def test_restore_preview_and_backup_preserve_index_and_extra_files(self):
+        ident = self.init()
+        self.file.write_text('changed')
+        (self.root / 'new.py').write_text('keep me')
+        index_before = subprocess.check_output(['git', 'diff', '--cached'])
+        self.assertEqual(self.cli('restore', ident)[0], 0)
+        self.assertEqual(self.file.read_text(), 'changed')
+        self.assertEqual(self.cli('restore', ident, '--apply')[0], 0)
+        self.assertEqual(self.file.read_text(), 'print("start")\n')
+        self.assertEqual((self.root / 'new.py').read_text(), 'keep me')
+        self.assertEqual(subprocess.check_output(['git', 'diff', '--cached']), index_before)
+        backup = self.state()['checkpoints'][-1]['id']
+        self.assertEqual((self.root / f'.agentproof/snapshots/{backup}/files/app.py').read_text(), 'changed')
+
+    def test_restore_deleted_file(self):
+        ident = self.init()
+        self.file.unlink()
+        self.assertEqual(self.cli('restore', ident, '--apply')[0], 0)
+        self.assertTrue(self.file.exists())
+
+    def test_restore_refuses_to_overwrite_file_not_in_backup_scope(self):
+        extra = self.root / 'initial.txt'
+        extra.write_text('initial')
+        ident = self.init()
+        extra.write_text('important later work')
+        (self.root / '.gitignore').write_text('initial.txt\n')
+        self.assertEqual(self.cli('restore', ident, '--apply')[0], 2)
+        self.assertEqual(extra.read_text(), 'important later work')
+
+    def test_pass_failure_and_stale_evidence(self):
+        self.init()
+        self.assertEqual(self.cli('verify', '--', sys.executable, '-c', 'print("ok")')[0], 0)
+        self.assertIn('matches current captured files', self.cli('status')[1])
+        self.file.write_text('new code')
+        self.assertIn('STALE', self.cli('status')[1])
+        self.assertEqual(self.cli('verify', '--', sys.executable, '-c', 'raise SystemExit(3)')[0], 1)
+        self.assertEqual(self.state()['checks'][-1]['exit_code'], 3)
+        self.assertIn('**FAIL**', self.cli('status')[1])
+
+    def test_check_that_changes_code_is_not_fresh(self):
+        self.init()
+        self.assertEqual(self.cli('verify', '--', sys.executable, '-c',
+                                 'from pathlib import Path; Path("app.py").write_text("changed")')[0], 0)
+        self.assertIn('STALE', self.cli('status')[1])
+
+    def test_timeout_and_missing_executable_recorded(self):
+        self.init()
+        self.assertEqual(self.cli('verify', '--timeout', '0.05', '--', sys.executable,
+                                 '-c', 'import time; time.sleep(10)')[0], 1)
+        self.assertTrue(self.state()['checks'][-1]['timed_out'])
+        self.assertEqual(self.cli('verify', '--', 'agentproof-nonexistent-command')[0], 1)
+        self.assertEqual(self.state()['checks'][-1]['exit_code'], 127)
+
+    def test_import_partial_jsonl_without_storing_messages(self):
+        self.init()
+        fixture = self.root / '.agentproof/session.jsonl'
+        rows = [
+            {'type': 'system', 'subtype': 'compact_boundary'},
+            {'message': {'content': [{'type': 'tool_use', 'input': {'secret': 'DO_NOT_COPY'}}]}},
+            {'message': {'content': [{'type': 'tool_result', 'is_error': True,
+                                      'content': 'output truncated'}]}},
+        ]
+        fixture.write_text('\n'.join(json.dumps(r) for r in rows) + '\n{broken\n[]\n')
+        self.assertEqual(self.cli('import-session', str(fixture))[0], 0)
+        state = self.state()
+        self.assertEqual(state['sessions'][0]['metrics'], {
+            'records': 3, 'malformed_lines': 2, 'tool_calls': 1, 'tool_errors': 1,
+            'compactions': 1, 'truncation_markers': 1})
+        self.assertNotIn('DO_NOT_COPY', json.dumps(state))
+
+    def test_sensitive_ignored_and_symlink_files_excluded(self):
+        (self.root / '.env').write_text('secret')
+        (self.root / '.gitignore').write_text('ignored.txt\n')
+        (self.root / 'ignored.txt').write_text('ignored')
+        (self.root / 'link.py').symlink_to(self.file)
+        ident = self.init()
+        manifest = json.loads((self.root / f'.agentproof/snapshots/{ident}/manifest.json').read_text())
+        self.assertNotIn('.env', manifest['files'])
+        self.assertNotIn('link.py', manifest['files'])
+        self.assertNotIn('ignored.txt', manifest['files'])
+        self.assertEqual(len(manifest['omitted']), 2)
+
+    def test_restore_rejects_symlink_and_corrupted_snapshot(self):
+        ident = self.init()
+        self.file.unlink()
+        self.file.symlink_to(self.root / 'outside.py')
+        self.assertEqual(self.cli('restore', ident, '--apply')[0], 2)
+        self.file.unlink()
+        self.file.write_text('current')
+        (self.root / f'.agentproof/snapshots/{ident}/files/app.py').write_text('tampered')
+        self.assertEqual(self.cli('restore', ident, '--apply')[0], 2)
+        self.assertEqual(self.file.read_text(), 'current')
+
+    def test_path_traversal_rejected(self):
+        for name in ('../escape', '/tmp/escape', '.git/config', '.agentproof/task.json'):
+            with self.assertRaises(ValueError):
+                safe_path(self.root, name)
+
+    def test_lock_and_unknown_checkpoint(self):
+        self.init()
+        lock = self.root / '.agentproof/lock'
+        lock.mkdir()
+        self.assertEqual(self.cli('checkpoint')[0], 2)
+        self.assertTrue(lock.exists())
+        lock.rmdir()
+        self.assertEqual(self.cli('restore', '../escape')[0], 2)
+
+    def test_report_generation_and_no_checks_claim(self):
+        self.init()
+        self.assertEqual(self.cli('report')[0], 0)
+        content = (self.root / '.agentproof/report.md').read_text()
+        self.assertIn('No verification commands recorded', content)
+        self.assertIn('does not certify correctness', content)
+
+
+if __name__ == '__main__':
+    unittest.main()
