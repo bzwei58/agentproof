@@ -2,7 +2,7 @@
 
 **Evidence for AI coding tasks. Local checkpoints, real command results, honest handoff reports.**
 
-[中文说明](README.zh-CN.md) · [Example report](examples/report.md) · MIT license
+[中文说明](README.zh-CN.md) · [Five-minute start](docs/quickstart.md) · [Example report](examples/report.md) · MIT license
 
 AI says “done.” What actually changed? Which checks ran, and do they still match the code?
 AgentProof answers those questions without another model or an API key.
@@ -21,15 +21,24 @@ $ agentproof report
 Requires Python 3.10+, Git, and macOS or Linux. Windows is not supported in v0.1.
 This project is not published to PyPI yet.
 
+With [pipx installed and on PATH](https://pipx.pypa.io/stable/installation/), install directly from GitHub:
+
 ```bash
-git clone https://github.com/bzwei58/agentproof.git
-cd agentproof
-python3 -m venv .venv
-.venv/bin/python -m pip install -e .
-# Use the absolute path to .venv/bin/agentproof from your project.
+pipx install 'git+https://github.com/bzwei58/agentproof.git@main'
 ```
 
-For a global isolated command, use `pipx install .` from this checkout if you have pipx.
+Then run `agentproof --version` from any project. If the command is missing, run
+`pipx ensurepath` and reopen your terminal. The package is named `agentproof-cli`, while
+the command is `agentproof`; remove it with `pipx uninstall agentproof-cli`.
+This installs the current main branch, not a versioned release.
+
+If you do not use pipx, create a virtual environment and install the same Git URL with its
+Python: `python3 -m venv /your/chosen/venv`, then
+`/your/chosen/venv/bin/python -m pip install 'git+https://github.com/bzwei58/agentproof.git@main'`.
+Use `/your/chosen/venv/bin/agentproof` or activate that environment.
+
+Start with the [five-minute walkthrough](docs/quickstart.md): one failing test, a fix,
+a stale check and a report, all in a disposable directory. For a real project, follow the workflow below.
 
 ## Workflow
 
@@ -97,9 +106,15 @@ recover overwritten captured content. Do not manually edit snapshot manifests or
 ## Development
 
 ```bash
+git clone https://github.com/bzwei58/agentproof.git
+cd agentproof
+python3 -m venv .venv
+.venv/bin/python -m pip install -e .
 python3 -m unittest discover -s tests -v
 python3 -m agentproof --help
 ```
+
+Want to try it on two real tasks? See the [pilot guide and feedback form](docs/pilot.md).
 
 Tests use disposable Git repositories and cover stale evidence, nonzero exits, timeout,
 initial uncommitted edits, restoration backups, symlink rejection, secret exclusions and

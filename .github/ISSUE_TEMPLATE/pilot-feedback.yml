@@ -1,0 +1,70 @@
+name: 试用反馈 / Pilot feedback
+description: 记录一个真实 AI 编程任务的使用结果；每人两个任务。
+title: '[Pilot] '
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢试用。Issues 是公开的，请不要上传私有源码、完整日志、密钥或 `.agentproof/`。
+        使用自选匿名编号关联两个任务即可，不需要姓名、邮箱或公司信息。
+  - type: input
+    id: participant
+    attributes:
+      label: 匿名编号 / Anonymous participant ID
+      placeholder: 例如 pilot-03
+    validations:
+      required: true
+  - type: dropdown
+    id: task_number
+    attributes:
+      label: 第几个真实任务？ / Task number
+      options:
+        - '1'
+        - '2'
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: 使用环境 / Environment
+      description: 系统、Python 与 AgentProof 版本、AI 编程工具；无需项目地址。
+    validations:
+      required: true
+  - type: textarea
+    id: task
+    attributes:
+      label: 任务与检查 / Task and checks
+      description: 简述真实任务、检查命令、报告是否生成；若失败，请说明卡点。
+    validations:
+      required: true
+  - type: textarea
+    id: time
+    attributes:
+      label: 时间和额外负担 / Time and overhead
+      description: 安装/首次报告耗时、审查起止时间与范围（是否包含测试等待）、额外操作耗时；不确定可填未知。
+    validations:
+      required: true
+  - type: textarea
+    id: value
+    attributes:
+      label: 是否影响审查决定？ / Concrete review value
+      description: 报告是否帮助接受/拒绝/继续修改？发现了什么、依据是什么？没有帮助也请说明。
+    validations:
+      required: true
+  - type: dropdown
+    id: reuse
+    attributes:
+      label: 这次为什么使用？ / Reason for using
+      options:
+        - 首次试用 / First trial
+        - 主动再次使用 / Voluntary reuse
+        - 被提醒后再次使用 / Reminded reuse
+    validations:
+      required: true
+  - type: textarea
+    id: next_time
+    attributes:
+      label: 下次还会用吗？ / Would you use it again?
+      description: 请说明原因和最主要的使用障碍。
+    validations:
+      required: true
