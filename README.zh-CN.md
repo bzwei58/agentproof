@@ -2,7 +2,7 @@
 
 **给 AI 编程任务留下可核对的证据：本地快照、真实检查结果、交付报告。**
 
-[English](README.md) · [示例报告](examples/report.md)
+[English](README.md) · [五分钟上手](docs/quickstart.zh-CN.md) · [示例报告](examples/report.md)
 
 AI 说“完成了”，但它改了什么？测试真的跑过吗？测试通过之后代码又变了吗？
 AgentProof 先解决这些具体问题，不需要模型、API Key 或云服务。
@@ -11,15 +11,21 @@ AgentProof 先解决这些具体问题，不需要模型、API Key 或云服务�
 
 需要 Python 3.10+、Git、macOS 或 Linux。第一版不支持 Windows，尚未发布到 PyPI。
 
+已[安装 pipx 并配置 PATH](https://pipx.pypa.io/stable/installation/) 时，一条命令即可从 GitHub 安装：
+
 ```bash
-git clone https://github.com/bzwei58/agentproof.git
-cd agentproof
-python3 -m venv .venv
-.venv/bin/python -m pip install -e .
+pipx install 'git+https://github.com/bzwei58/agentproof.git@main'
 ```
 
-之后在需要检查的代码仓库中，用安装目录下 `.venv/bin/agentproof` 的绝对路径调用。
-已有 pipx 的用户也可以在安装目录运行 `pipx install .`，获得全局命令。
+之后在任意项目执行 `agentproof --version`。如果提示找不到命令，执行 `pipx ensurepath` 并重开终端。
+安装包名是 `agentproof-cli`，命令名是 `agentproof`；卸载命令为 `pipx uninstall agentproof-cli`。
+目前安装的是 main 分支最新代码，不是带版本标签的正式发行版。
+
+不用 pipx 也可以：先用 `python3 -m venv /你选择的路径/venv` 创建虚拟环境，再执行
+`/你选择的路径/venv/bin/python -m pip install 'git+https://github.com/bzwei58/agentproof.git@main'`。
+使用该目录下 `bin/agentproof` 的绝对路径调用，或激活虚拟环境。
+
+建议先完成[五分钟教程](docs/quickstart.zh-CN.md)：在独立临时目录里体验失败、修复、旧检查失效和报告。
 
 ## 使用
 
@@ -83,8 +89,14 @@ Git 历史和暂存区不会改变；恢复前会保存备份，拒绝符号链�
 ## 本地开发
 
 ```bash
+git clone https://github.com/bzwei58/agentproof.git
+cd agentproof
+python3 -m venv .venv
+.venv/bin/python -m pip install -e .
 python3 -m unittest discover -s tests -v
 python3 -m agentproof --help
 ```
+
+愿意在两个真实任务中试用？查看[试用指南和反馈表](docs/pilot.md)。
 
 MIT 开源协议。欢迎提交可复现问题、会话格式样例或带测试的 PR。
