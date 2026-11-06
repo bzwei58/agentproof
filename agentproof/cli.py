@@ -10,6 +10,8 @@ import sys
 import time
 import uuid
 
+from . import __version__
+
 STORE = ".agentproof"
 MAX_FILE = 10 * 1024 * 1024
 MAX_TOTAL = 100 * 1024 * 1024
@@ -410,7 +412,7 @@ def run(args, root):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--version", action="version", version="AgentProof 0.1.0")
+    parser.add_argument("--version", action="version", version=f"AgentProof {__version__}")
     sub = parser.add_subparsers(dest="action", required=True)
     p = sub.add_parser("init", help="Start a task and capture its baseline")
     p.add_argument("--goal", required=True)

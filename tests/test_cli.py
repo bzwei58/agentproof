@@ -9,6 +9,7 @@ import tempfile
 import unittest
 
 from agentproof.cli import main, safe_path
+from agentproof import __version__
 
 
 class CLITest(unittest.TestCase):
@@ -45,6 +46,14 @@ class CLITest(unittest.TestCase):
         self.assertEqual((self.root / f'.agentproof/snapshots/{ident}/files/app.py').read_text(),
                          'existing user edit')
         self.assertEqual(self.cli('init', '--goal', 'again')[0], 2)
+
+    def test_version_matches_package_version(self):
+        out = io.StringIO()
+        with self.assertRaises(SystemExit) as exc:
+            with contextlib.redirect_stdout(out):
+                main(['--version'])
+        self.assertEqual(exc.exception.code, 0)
+        self.assertEqual(out.getvalue().strip(), f'AgentProof {__version__}')
 
     def test_evidence_is_git_ignored(self):
         self.init()
