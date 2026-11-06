@@ -357,7 +357,7 @@ def run(args, root):
                     terminate_process_group(proc)
                     code = 130
             except OSError as exc:
-                output.write(str(exc).encode())
+                output.write(f"{command[0]}: {exc}".encode())
                 code = 127
         after = fingerprint(*inventory(root))
         import shlex
