@@ -218,10 +218,12 @@ def review_claims(root, state, claims, source):
     """
     current, omitted = inventory(root)
     current_fp = fingerprint(current, omitted)
-    changed = [p for p in current if p not in get_snapshot(root, state, state["checkpoints"][0]["id"])["files"]
-               or get_snapshot(root, state, state["checkpoints"][0]["id"])["files"].get(p) != current[p]]
+    baseline = get_snapshot(root, state, state["checkpoints"][0]["id"])["files"]
+    changed = [p for p in sorted(set(baseline) | set(current)) if baseline.get(p) != current.get(p)]
     checks = state.get("checks", [])
-    fresh_pass = [c for c in checks if c["exit_code"] == 0 and c["before"] == c["after"] == current_fp]
+    verification_words = re.compile(r"\b(test|tests|pytest|unittest|jest|vitest|mocha|lint|format|build|compile|check|检查|测试|构建|编译)\b", re.I)
+    fresh_pass = [c for c in checks if c["exit_code"] == 0 and c["before"] == c["after"] == current_fp
+                  and verification_words.search(c["command"])]
     items, questions = [], []
     for raw in claims:
         claim = " ".join(raw.strip().split())
