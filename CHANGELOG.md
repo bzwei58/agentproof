@@ -2,6 +2,10 @@
 
 All notable changes to AgentProof are documented here.
 
+## Unreleased
+
+- Add Windows process timeout handling and Windows CI coverage.
+
 ## 0.2.0 — 2026-11-06
 
 ### Added

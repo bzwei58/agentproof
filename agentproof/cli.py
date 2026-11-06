@@ -17,6 +17,16 @@ MAX_FILE = 10 * 1024 * 1024
 MAX_TOTAL = 100 * 1024 * 1024
 
 
+def terminate_process_group(proc):
+    """Terminate a timed-out command on POSIX and Windows."""
+    if os.name == "nt":
+        proc.kill()
+    else:
+        import signal
+        os.killpg(proc.pid, signal.SIGKILL)
+    proc.wait()
+
+
 def now():
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
@@ -332,19 +342,19 @@ def run(args, root):
         timed_out = False
         with (root / log).open("wb") as output:
             try:
-                proc = subprocess.Popen(command, cwd=root, stdout=output, stderr=subprocess.STDOUT,
-                                        start_new_session=True)
+                popen_kwargs = {"cwd": root, "stdout": output, "stderr": subprocess.STDOUT}
+                if os.name != "nt":
+                    popen_kwargs["start_new_session"] = True
+                else:
+                    popen_kwargs["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+                proc = subprocess.Popen(command, **popen_kwargs)
                 try:
                     code = proc.wait(timeout=args.timeout)
                 except subprocess.TimeoutExpired:
-                    import signal
-                    os.killpg(proc.pid, signal.SIGKILL)
-                    proc.wait()
+                    terminate_process_group(proc)
                     code, timed_out = 124, True
                 except KeyboardInterrupt:
-                    import signal
-                    os.killpg(proc.pid, signal.SIGKILL)
-                    proc.wait()
+                    terminate_process_group(proc)
                     code = 130
             except OSError as exc:
                 output.write(str(exc).encode())
