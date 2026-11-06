@@ -19,7 +19,8 @@ $ agentproof report
 ## Install
 
 Requires Python 3.10+, Git, and macOS or Linux. Windows is not supported in v0.2.
-This project is not published to PyPI yet.
+PyPI publication is configured through the release workflow, but the project is not yet
+published there. Until the first PyPI release, install from the GitHub URL below.
 
 With [pipx installed and on PATH](https://pipx.pypa.io/stable/installation/), install directly from GitHub:
 
