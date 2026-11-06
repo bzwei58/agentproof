@@ -2,7 +2,7 @@
 
 **给 AI 编程任务留下可核对的证据：本地快照、真实检查结果、交付报告。**
 
-[English](README.md) · [五分钟上手](docs/quickstart.zh-CN.md) · [示例报告](examples/report.md)
+[English](README.md) · [五分钟上手](docs/quickstart.zh-CN.md) · [示例报告](examples/report.md) · [变更日志](CHANGELOG.md)
 
 AI 说“完成了”，但它改了什么？测试真的跑过吗？测试通过之后代码又变了吗？
 AgentProof 先解决这些具体问题，不需要模型、API Key 或云服务。
@@ -43,6 +43,11 @@ agentproof verify --timeout 60 -- npm run lint
 # 可选：导入 Claude Code JSONL 会话的基础信号统计
 agentproof import-session /path/to/session.jsonl
 
+# 把 AI 最终总结变成人工审查清单（每行一条声明）
+agentproof review --summary ai-summary.txt
+# 或直接输入声明
+agentproof review --claim "修复了支付重试问题" --claim "所有测试通过"
+
 # 查看和生成报告
 agentproof status
 agentproof report
@@ -66,10 +71,12 @@ agentproof restore CHECKPOINT_ID --apply
 - 记录命令真实退出码、输出和超时；检查自己改了文件也会标记为旧证据。
 - 导入 Claude Code 风格 JSONL，统计工具调用、工具错误、上下文压缩、截断标记及坏行。
 - 生成本地 Markdown 报告，明确记录已知事实与未验证范围。
+- `review` 将 AI 的完成声明与文件变化、最新检查结果匹配，分为 **VERIFIED（已验证）**、**OBSERVED（已观察）**、**UNVERIFIED（未验证）** 和 **CONFLICT（矛盾）**。
 
 ## 边界
 
-它不能保证代码正确，也不会自动断言“需求已完成”。目前没有实时监听、自动测试发现、
+它不能保证代码正确，也不会自动断言“需求已完成”。`review` 使用透明规则、不调用模型，
+也不判断需求本身是否正确。目前没有实时监听、自动测试发现、
 模型风险评分或跨工具自动关联。会话只导入统计，不复制原始消息；格式变化可能导致漏计。
 截断文本只是启发式信号，不代表重要信息必然丢失。
 
