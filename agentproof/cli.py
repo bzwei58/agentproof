@@ -198,7 +198,61 @@ def report(root, state):
     lines += [f"- Omitted `{x['path']}`: {x['reason']}" for x in omitted]
     lines += ["", "## Checkpoints", ""]
     lines += [f"- `{s['id']}` — {s['label']} ({s['time']})" for s in state["checkpoints"]]
+    if state.get("reviews"):
+        lines += ["", "## Claim review", ""]
+        for review in state["reviews"]:
+            lines += [f"Reviewed: `{review['source']}` ({review['time']})", ""]
+            for item in review["items"]:
+                lines.append(f"- **{item['status']}** {item['claim']} — {item['reason']}")
+            if review.get("questions"):
+                lines += ["", "### Human confirmation", ""]
+                lines += [f"- {question}" for question in review["questions"]]
     return "\n".join(lines) + "\n"
+
+
+def review_claims(root, state, claims, source):
+    """Match plain-language completion claims to observed local evidence.
+
+    This deliberately uses transparent rules instead of another model. A claim is
+    never upgraded to VERIFIED just because it sounds confident.
+    """
+    current, omitted = inventory(root)
+    current_fp = fingerprint(current, omitted)
+    changed = [p for p in current if p not in get_snapshot(root, state, state["checkpoints"][0]["id"])["files"]
+               or get_snapshot(root, state, state["checkpoints"][0]["id"])["files"].get(p) != current[p]]
+    checks = state.get("checks", [])
+    fresh_pass = [c for c in checks if c["exit_code"] == 0 and c["before"] == c["after"] == current_fp]
+    items, questions = [], []
+    for raw in claims:
+        claim = " ".join(raw.strip().split())
+        if not claim:
+            continue
+        lower = claim.lower()
+        is_test = bool(re.search(r"\b(test|tests|pytest|unittest|lint|build|check|检查|测试|构建)\b", lower))
+        says_pass = bool(re.search(r"\b(pass|passed|passing|success|successful|green|通过|成功|完成)\b", lower))
+        says_change = bool(re.search(r"\b(fix|fixed|change|changed|implement|implemented|修复|修改|实现)\b", lower))
+        if is_test and says_pass:
+            if fresh_pass:
+                items.append({"status": "VERIFIED", "claim": claim,
+                              "reason": f"{len(fresh_pass)} 个成功检查与当前文件指纹一致"})
+            elif checks:
+                items.append({"status": "CONFLICT", "claim": claim,
+                              "reason": "检查存在，但没有一个成功结果仍与当前文件一致"})
+                questions.append("重新运行与该声明对应的测试、构建或 lint，并确认结果匹配当前代码。")
+            else:
+                items.append({"status": "UNVERIFIED", "claim": claim, "reason": "没有记录任何检查命令"})
+                questions.append("补充可复现的测试、构建或 lint 命令。")
+        elif says_change:
+            if changed:
+                items.append({"status": "OBSERVED", "claim": claim,
+                              "reason": f"检测到 {len(changed)} 个文件相对任务起点发生变化"})
+            else:
+                items.append({"status": "CONFLICT", "claim": claim, "reason": "当前工作区没有相对任务起点的文件变化"})
+                questions.append("确认修改是否写入了另一个目录、分支或工作树。")
+        else:
+            items.append({"status": "UNVERIFIED", "claim": claim, "reason": "没有可匹配的本地证据规则"})
+            questions.append("为这条声明指定可复现的文件、命令或外部结果证据。")
+    return {"time": now(), "source": source, "items": items, "questions": list(dict.fromkeys(questions))}
 
 
 def log_tail(path):
@@ -244,6 +298,24 @@ def run(args, root):
         state["sessions"].append({"imported": now(), "metrics": metrics})
         save(store / "task.json", state)
         print(json.dumps(metrics, indent=2))
+    elif args.action == "review":
+        claims = list(args.claim or [])
+        if args.summary:
+            summary_path = Path(args.summary)
+            if not summary_path.is_file():
+                raise ValueError(f"Summary file not found: {args.summary}")
+            claims.extend(summary_path.read_text(errors="replace").splitlines())
+        if not claims:
+            raise ValueError("Provide --summary FILE or at least one --claim")
+        review = review_claims(root, state, claims, args.summary or "command line claims")
+        state.setdefault("reviews", []).append(review)
+        save(store / "task.json", state)
+        for item in review["items"]:
+            print(f"{item['status']}: {item['claim']} — {item['reason']}")
+        if review["questions"]:
+            print("\nHuman confirmation:")
+            for question in review["questions"]:
+                print(f"- {question}")
     elif args.action == "verify":
         command = args.command
         if command and command[0] == "--":
@@ -344,6 +416,9 @@ def main(argv=None):
     p.add_argument("--label", default="manual checkpoint")
     p = sub.add_parser("import-session", help="Import Claude Code JSONL signal counts")
     p.add_argument("path")
+    p = sub.add_parser("review", help="Match AI completion claims to recorded local evidence")
+    p.add_argument("--summary", help="Text file containing one completion claim per line")
+    p.add_argument("--claim", action="append", help="A completion claim; repeat for multiple claims")
     p = sub.add_parser("verify", help="Run a command, capture output and record workspace fingerprints")
     p.add_argument("--timeout", type=float, default=300)
     p.add_argument("command", nargs=argparse.REMAINDER)

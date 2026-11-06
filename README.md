@@ -53,8 +53,10 @@ that repository's root. One active task is supported per checkout; use a worktre
    Run each test, lint or build command separately. Shell operators are not interpreted;
    explicitly use `sh -c '...'` if you need shell syntax. Only run commands you trust.
 5. **Optionally import session signals.** `agentproof import-session /path/to/session.jsonl`.
-6. **Review.** `agentproof status` prints evidence; `agentproof report` writes Markdown.
-7. **Recover selected snapshot contents.** `agentproof restore CHECKPOINT_ID` previews changes;
+6. **Review AI claims.** `agentproof review --summary ai-summary.txt` (one claim per line), or repeat
+   `--claim "All tests passed"`. It reports `VERIFIED`, `OBSERVED`, `UNVERIFIED` and `CONFLICT`.
+7. **Review.** `agentproof status` prints evidence; `agentproof report` writes Markdown.
+8. **Recover selected snapshot contents.** `agentproof restore CHECKPOINT_ID` previews changes;
    add `--apply` to write them, after an automatic backup checkpoint.
 
 `verify --timeout 60 -- COMMAND ...` sets a timeout in seconds (default 300).
@@ -74,12 +76,14 @@ when applicable. Successful commands stay quiet. The full log is always retained
   inspect the exact recorded invocation.
 - Optional Claude Code JSONL counts: tool calls, error results, compaction boundaries,
   truncation markers and malformed records. Raw imported messages are not copied.
+- Claim review matches completion statements to local file changes and fresh checks using transparent rules.
 
 ## Boundaries
 
-This is an **evidence recorder**, not an automatic correctness judge. A passing check does
+This is an **evidence recorder and claim-gap detector**, not an automatic correctness judge. A passing check does
 not prove requirements satisfaction, coverage or absence of bugs. There is no model-based
 risk scoring, live session watcher, automatic test discovery or cross-agent correlation yet.
+Claim review never calls a model and cannot decide whether a requirement is substantively correct.
 Session import is best-effort for Claude Code-style `message.content` blocks and
 `system/compact_boundary` records. Other formats and future schema changes may not be counted.
 Truncation text is a heuristic signal, not proof that important context was lost.
