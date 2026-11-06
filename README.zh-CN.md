@@ -2,7 +2,7 @@
 
 **给 AI 编程任务留下可核对的证据：本地快照、真实检查结果、交付报告。**
 
-[English](README.md) · [五分钟上手](docs/quickstart.zh-CN.md) · [示例报告](examples/report.md) · [变更日志](CHANGELOG.md)
+[English](README.md) · [五分钟上手](docs/quickstart.zh-CN.md) · [示例报告](examples/report.md) · [变更日志](CHANGELOG.md) · [安全说明](SECURITY.md)
 
 AI 说“完成了”，但它改了什么？测试真的跑过吗？测试通过之后代码又变了吗？
 AgentProof 先解决这些具体问题，不需要模型、API Key 或云服务。

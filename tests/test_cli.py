@@ -220,6 +220,21 @@ class CLITest(unittest.TestCase):
             'compactions': 1, 'truncation_markers': 1})
         self.assertNotIn('DO_NOT_COPY', json.dumps(state))
 
+    def test_import_counts_top_level_tool_events_without_storing_payloads(self):
+        self.init()
+        fixture = self.root / 'codex-session.jsonl'
+        rows = [
+            {'type': 'tool_call', 'name': 'shell', 'arguments': {'secret': 'DO_NOT_COPY'}},
+            {'type': 'tool_result', 'is_error': True, 'output': 'truncated output'},
+        ]
+        fixture.write_text('\n'.join(json.dumps(r) for r in rows) + '\n')
+        self.assertEqual(self.cli('import-session', str(fixture))[0], 0)
+        state = self.state()
+        self.assertEqual(state['sessions'][0]['metrics']['tool_calls'], 1)
+        self.assertEqual(state['sessions'][0]['metrics']['tool_errors'], 1)
+        self.assertEqual(state['sessions'][0]['metrics']['truncation_markers'], 1)
+        self.assertNotIn('DO_NOT_COPY', json.dumps(state))
+
     def test_sensitive_ignored_and_symlink_files_excluded(self):
         (self.root / '.env').write_text('secret')
         (self.root / '.gitignore').write_text('ignored.txt\n')

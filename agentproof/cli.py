@@ -151,6 +151,16 @@ def import_session(path):
             content = message.get("content", []) if isinstance(message, dict) else []
             if not isinstance(content, list):
                 content = []
+            # Codex, Cline and other clients often store tool events as top-level
+            # records instead of Claude's message.content blocks. Count only the
+            # event metadata; raw prompts and outputs are never persisted.
+            top_level_type = str(record.get("type", "")).lower()
+            if top_level_type in {"tool_use", "tool_call", "function_call"}:
+                metrics["tool_calls"] += 1
+            if top_level_type in {"tool_result", "tool_output", "function_result"}:
+                metrics["tool_errors"] += bool(record.get("is_error") or record.get("error"))
+                if re.search(r"\btruncated\b", json.dumps(record, ensure_ascii=False), re.I):
+                    metrics["truncation_markers"] += 1
             for block in content:
                 if not isinstance(block, dict):
                     continue
