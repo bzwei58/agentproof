@@ -421,6 +421,12 @@ def run(args, root):
 
 
 def main(argv=None):
+    # Windows consoles may default to a legacy code page that cannot render the
+    # bilingual review questions. Keep reports and diagnostics lossless.
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--version", action="version", version=f"AgentProof {__version__}")
     sub = parser.add_subparsers(dest="action", required=True)
