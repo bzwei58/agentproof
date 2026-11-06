@@ -26,6 +26,7 @@ pipx install 'git+https://github.com/bzwei58/agentproof.git@main'
 使用该目录下 `bin/agentproof` 的绝对路径调用，或激活虚拟环境。
 
 建议先完成[五分钟教程](docs/quickstart.zh-CN.md)：在独立临时目录里体验失败、修复、旧检查失效和报告。
+PyPI 发布工作流已经准备好，但首次发布前仍需在 PyPI 配置 Trusted Publisher；目前请从 GitHub 安装。
 
 ## 使用
 

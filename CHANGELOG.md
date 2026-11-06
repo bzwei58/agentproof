@@ -22,6 +22,12 @@ All notable changes to AgentProof are documented here.
 AgentProof records local evidence and highlights evidence gaps. It does not prove that a
 requirement is correct, discover tests automatically, or judge production behavior.
 
+### Publishing
+
+The repository now contains a GitHub Actions workflow for PyPI publishing through
+Trusted Publishing. The package is not advertised as available on PyPI until a release
+has completed that workflow successfully.
+
 ## 0.1.0
 
 Initial public development release with checkpoints, command verification, session signal
