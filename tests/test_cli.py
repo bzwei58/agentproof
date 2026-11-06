@@ -255,6 +255,35 @@ class CLITest(unittest.TestCase):
         self.assertIn('No verification commands recorded', content)
         self.assertIn('does not certify correctness', content)
 
+    def test_review_matches_fresh_test_and_reports_missing_evidence(self):
+        self.init()
+        self.file.write_text('print("changed")\n')
+        self.assertEqual(self.cli('verify', '--', sys.executable, '-c', 'print("ok")')[0], 0)
+        code, output = self.cli('review', '--claim', 'Fixed the bug', '--claim', 'All tests passed')
+        self.assertEqual(code, 0)
+        self.assertIn('OBSERVED: Fixed the bug', output)
+        self.assertIn('VERIFIED: All tests passed', output)
+        self.assertEqual(self.cli('report')[0], 0)
+        report = (self.root / '.agentproof/report.md').read_text()
+        self.assertIn('## Claim review', report)
+
+    def test_review_flags_test_claim_when_check_is_stale(self):
+        self.init()
+        self.assertEqual(self.cli('verify', '--', sys.executable, '-c', 'print("ok")')[0], 0)
+        self.file.write_text('changed after test')
+        code, output = self.cli('review', '--claim', 'Tests passed')
+        self.assertEqual(code, 0)
+        self.assertIn('CONFLICT: Tests passed', output)
+
+    def test_review_can_read_summary_file(self):
+        self.init()
+        summary = self.root / 'summary.txt'
+        summary.write_text('Implemented the change\nNo external verification was performed\n')
+        code, output = self.cli('review', '--summary', str(summary))
+        self.assertEqual(code, 0)
+        self.assertIn('OBSERVED: Implemented the change', output)
+        self.assertIn('UNVERIFIED: No external verification was performed', output)
+
     def test_report_compacts_multiline_commands_without_losing_evidence(self):
         self.init()
         script = 'print("ok")\n# ' + ('long command ' * 30) + '```'
