@@ -269,11 +269,11 @@ class CLITest(unittest.TestCase):
         self.file.write_text('print("changed")\n')
         self.assertEqual(self.cli('verify', '--', sys.executable, '-c', 'print("ok") # test')[0], 0)
         code, output = self.cli('review', '--claim', 'Fixed the bug', '--claim', 'All tests passed')
-        self.assertEqual(code, 0)
+        self.assertEqual(code, 0, output)
         self.assertIn('OBSERVED: Fixed the bug', output)
         self.assertIn('VERIFIED: All tests passed', output)
         self.assertEqual(self.cli('report')[0], 0)
-        report = (self.root / '.agentproof/report.md').read_text()
+        report = (self.root / '.agentproof/report.md').read_text(encoding='utf-8')
         self.assertIn('## Claim review', report)
 
     def test_review_flags_test_claim_when_check_is_stale(self):
@@ -281,7 +281,7 @@ class CLITest(unittest.TestCase):
         self.assertEqual(self.cli('verify', '--', sys.executable, '-c', 'print("ok")')[0], 0)
         self.file.write_text('changed after test')
         code, output = self.cli('review', '--claim', 'Tests passed')
-        self.assertEqual(code, 0)
+        self.assertEqual(code, 0, output)
         self.assertIn('CONFLICT: Tests passed', output)
 
     def test_review_can_read_summary_file(self):
@@ -289,7 +289,7 @@ class CLITest(unittest.TestCase):
         summary = self.root / 'summary.txt'
         summary.write_text('Implemented the change\nNo external verification was performed\n')
         code, output = self.cli('review', '--summary', str(summary))
-        self.assertEqual(code, 0)
+        self.assertEqual(code, 0, output)
         self.assertIn('OBSERVED: Implemented the change', output)
         self.assertIn('UNVERIFIED: No external verification was performed', output)
 
@@ -297,14 +297,14 @@ class CLITest(unittest.TestCase):
         self.init()
         self.assertEqual(self.cli('verify', '--', sys.executable, '-c', 'print("ok")')[0], 0)
         code, output = self.cli('review', '--claim', 'All tests passed')
-        self.assertEqual(code, 0)
+        self.assertEqual(code, 0, output)
         self.assertIn('CONFLICT: All tests passed', output)
 
     def test_review_counts_deleted_files_as_changes(self):
         self.init()
         self.file.unlink()
         code, output = self.cli('review', '--claim', 'Fixed the bug')
-        self.assertEqual(code, 0)
+        self.assertEqual(code, 0, output)
         self.assertIn('OBSERVED: Fixed the bug', output)
 
     def test_report_compacts_multiline_commands_without_losing_evidence(self):

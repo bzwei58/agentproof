@@ -9,7 +9,7 @@ AgentProof 先解决这些具体问题，不需要模型、API Key 或云服务�
 
 ## 安装
 
-需要 Python 3.10+、Git、macOS 或 Linux。第一版不支持 Windows，尚未发布到 PyPI。
+需要 Python 3.10+、Git、macOS、Linux 或 Windows。PyPI 发布工作流已经准备好，但目前请从 GitHub 安装。
 
 已[安装 pipx 并配置 PATH](https://pipx.pypa.io/stable/installation/) 时，一条命令即可从 GitHub 安装：
 

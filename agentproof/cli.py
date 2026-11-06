@@ -17,6 +17,16 @@ MAX_FILE = 10 * 1024 * 1024
 MAX_TOTAL = 100 * 1024 * 1024
 
 
+def terminate_process_group(proc):
+    """Terminate a timed-out command on POSIX and Windows."""
+    if os.name == "nt":
+        proc.kill()
+    else:
+        import signal
+        os.killpg(proc.pid, signal.SIGKILL)
+    proc.wait()
+
+
 def now():
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
@@ -24,12 +34,12 @@ def now():
 def save(path, data):
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n")
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     tmp.replace(path)
 
 
 def load(path):
-    return json.loads(path.read_text())
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def git(root, *args):
@@ -122,7 +132,7 @@ def get_snapshot(root, state, ident):
 def import_session(path):
     metrics = {"records": 0, "malformed_lines": 0, "tool_calls": 0,
                "tool_errors": 0, "compactions": 0, "truncation_markers": 0}
-    with path.open() as source:
+    with path.open(encoding="utf-8") as source:
         for line in source:
             if not line.strip():
                 continue
@@ -284,7 +294,7 @@ def run(args, root):
         if not exclude_path.is_absolute():
             exclude_path = root / exclude_path
         exclude_path.parent.mkdir(parents=True, exist_ok=True)
-        with exclude_path.open("a") as f:
+        with exclude_path.open("a", encoding="utf-8") as f:
             f.write("\n/.agentproof/\n")
         state = {"version": 1, "goal": args.goal, "created": now(),
                  "checkpoints": [], "checks": [], "sessions": []}
@@ -308,7 +318,7 @@ def run(args, root):
             summary_path = Path(args.summary)
             if not summary_path.is_file():
                 raise ValueError(f"Summary file not found: {args.summary}")
-            claims.extend(summary_path.read_text(errors="replace").splitlines())
+            claims.extend(summary_path.read_text(encoding="utf-8", errors="replace").splitlines())
         if not claims:
             raise ValueError("Provide --summary FILE or at least one --claim")
         review = review_claims(root, state, claims, args.summary or "command line claims")
@@ -332,22 +342,22 @@ def run(args, root):
         timed_out = False
         with (root / log).open("wb") as output:
             try:
-                proc = subprocess.Popen(command, cwd=root, stdout=output, stderr=subprocess.STDOUT,
-                                        start_new_session=True)
+                popen_kwargs = {"cwd": root, "stdout": output, "stderr": subprocess.STDOUT}
+                if os.name != "nt":
+                    popen_kwargs["start_new_session"] = True
+                else:
+                    popen_kwargs["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+                proc = subprocess.Popen(command, **popen_kwargs)
                 try:
                     code = proc.wait(timeout=args.timeout)
                 except subprocess.TimeoutExpired:
-                    import signal
-                    os.killpg(proc.pid, signal.SIGKILL)
-                    proc.wait()
+                    terminate_process_group(proc)
                     code, timed_out = 124, True
                 except KeyboardInterrupt:
-                    import signal
-                    os.killpg(proc.pid, signal.SIGKILL)
-                    proc.wait()
+                    terminate_process_group(proc)
                     code = 130
             except OSError as exc:
-                output.write(str(exc).encode())
+                output.write(f"{command[0]}: {exc}".encode())
                 code = 127
         after = fingerprint(*inventory(root))
         import shlex
@@ -366,7 +376,7 @@ def run(args, root):
         result = report(root, state)
         if args.action == "report":
             path = store / "report.md"
-            path.write_text(result)
+            path.write_text(result, encoding="utf-8")
             print(path)
         else:
             print(result)
@@ -411,6 +421,12 @@ def run(args, root):
 
 
 def main(argv=None):
+    # Windows consoles may default to a legacy code page that cannot render the
+    # bilingual review questions. Keep reports and diagnostics lossless.
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--version", action="version", version=f"AgentProof {__version__}")
     sub = parser.add_subparsers(dest="action", required=True)
