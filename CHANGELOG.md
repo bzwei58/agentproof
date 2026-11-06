@@ -5,6 +5,8 @@ All notable changes to AgentProof are documented here.
 ## Unreleased
 
 - Add Windows process timeout handling and Windows CI coverage.
+- Add top-level tool event counting for common non-Claude session JSONL formats.
+- Add security and privacy guidance for local evidence and command execution.
 
 ## 0.2.0 — 2026-11-06
 

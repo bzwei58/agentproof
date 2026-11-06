@@ -2,7 +2,7 @@
 
 **Evidence for AI coding tasks. Local checkpoints, real command results, honest handoff reports.**
 
-[中文说明](README.zh-CN.md) · [Five-minute start](docs/quickstart.md) · [Example report](examples/report.md) · [Changelog](CHANGELOG.md) · MIT license
+[中文说明](README.zh-CN.md) · [Five-minute start](docs/quickstart.md) · [Example report](examples/report.md) · [Changelog](CHANGELOG.md) · [Security](SECURITY.md) · MIT license
 
 AI says “done.” What actually changed? Which checks ran, and do they still match the code?
 AgentProof answers those questions without another model or an API key.
