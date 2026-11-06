@@ -273,7 +273,7 @@ class CLITest(unittest.TestCase):
         self.assertIn('OBSERVED: Fixed the bug', output)
         self.assertIn('VERIFIED: All tests passed', output)
         self.assertEqual(self.cli('report')[0], 0)
-        report = (self.root / '.agentproof/report.md').read_text()
+        report = (self.root / '.agentproof/report.md').read_text(encoding='utf-8')
         self.assertIn('## Claim review', report)
 
     def test_review_flags_test_claim_when_check_is_stale(self):
