@@ -26,7 +26,7 @@ pipx install 'git+https://github.com/bzwei58/agentproof.git@main'
 使用该目录下 `bin/agentproof` 的绝对路径调用，或激活虚拟环境。
 
 建议先完成[五分钟教程](docs/quickstart.zh-CN.md)：在独立临时目录里体验失败、修复、旧检查失效和报告。
-PyPI 发布工作流已经准备好，但首次发布前仍需在 PyPI 配置 Trusted Publisher；目前请从 GitHub 安装。
+PyPI 可信发布者已配置；首次发布完成前，请从 GitHub 安装。
 
 ## 使用
 
@@ -109,7 +109,7 @@ python3 -m agentproof --help
 
 MIT 开源协议。欢迎提交可复现问题、会话格式样例或带测试的 PR。
 
-## 下一版本的证据匹配
+## 0.3.0 的证据匹配
 
 使用 `verify --kind test|lint|build|other -- COMMAND` 明确声明检查类型。
 类型由调用者提供，不是认证；旧检查不会自动获得类型。

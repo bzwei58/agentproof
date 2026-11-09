@@ -2,7 +2,7 @@
 
 All notable changes to AgentProof are documented here.
 
-## Unreleased
+## 0.3.0 — 2026-11-09
 
 - Remove natural-language VERIFIED claims; show only scoped observed command receipts.
 - Require explicit check categories; never infer verification from command keywords.
