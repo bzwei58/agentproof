@@ -24,7 +24,17 @@ MAX_TOTAL = 100 * 1024 * 1024
 def terminate_process_group(proc):
     """Terminate a timed-out command on POSIX and Windows."""
     if os.name == "nt":
-        proc.kill()
+        try:
+            result = subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                                    capture_output=True, timeout=15)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            proc.kill()
+            proc.wait()
+            raise OSError("Process-tree termination unavailable; parent terminated only") from exc
+        if result.returncode and proc.poll() is None:
+            proc.kill()
+            proc.wait()
+            raise OSError("Windows process-tree termination failed; parent terminated only")
     else:
         import signal
         os.killpg(proc.pid, signal.SIGKILL)
@@ -117,7 +127,8 @@ def file_digest(path):
 
 def check_evidence(root, check, current_fp):
     """Keep historical execution, current file scope, and log integrity separate."""
-    fresh = check["before"] == check["after"] == current_fp
+    known = current_fp is not None and check.get("before") is not None and check.get("after") is not None
+    fresh = known and check["before"] == check["after"] == current_fp
     integrity = "UNRECORDED"
     if check.get("log_sha256"):
         try:
@@ -130,12 +141,16 @@ def check_evidence(root, check, current_fp):
             integrity = "MISSING"
         except (OSError, ValueError):
             integrity = "UNREADABLE"
-    execution = "PASS" if check["exit_code"] == 0 else "FAIL"
+    execution = "UNKNOWN" if check.get("exit_code") is None else "PASS" if check["exit_code"] == 0 else "FAIL"
     if check.get("timed_out"):
         execution = "TIMEOUT"
-    return {"execution": execution, "workspace": "CURRENT" if fresh else "STALE",
+    if check.get("interrupted") or check.get("exit_code") == 130:
+        execution = "INTERRUPTED"
+    return {"execution": execution, "workspace": "UNKNOWN" if not known else "CURRENT" if fresh else "STALE",
             "log_integrity": integrity,
-            "usable": execution == "PASS" and fresh and integrity == "INTACT"}
+            "capture_error": check.get("capture_error"),
+            "termination_error": check.get("termination_error"),
+            "usable": execution == "PASS" and fresh and integrity == "INTACT" and not check.get("capture_error")}
 
 
 def checkpoint(root, state, label):
@@ -230,16 +245,23 @@ def latest_check_records(checks):
 
 
 def assessment(root, state):
-    current, omitted = inventory(root)
+    workspace_error = None
+    try:
+        current, omitted = inventory(root)
+    except (OSError, ValueError) as exc:
+        current, omitted, workspace_error = None, [], str(exc)
     baseline = get_snapshot(root, state, state["checkpoints"][0]["id"])["files"]
-    changed = [("added" if p not in baseline else "deleted" if p not in current else "modified", p)
-               for p in sorted(set(baseline) | set(current)) if baseline.get(p) != current.get(p)]
-    current_fp = fingerprint(current, omitted)
+    changed = ([("added" if p not in baseline else "deleted" if p not in current else "modified", p)
+                for p in sorted(set(baseline) | set(current)) if baseline.get(p) != current.get(p)]
+               if current is not None else [])
+    current_fp = fingerprint(current, omitted) if current is not None else None
     checks = [{"command": c["command"], "kind": c.get("kind", "other"),
                "name": c.get("name"), "log": c["log"], "exit_code": c["exit_code"],
                **check_evidence(root, c, current_fp)} for c in state["checks"]]
     latest = latest_check_records(checks)
     attention = []
+    if workspace_error:
+        attention.append(f"Workspace comparison UNKNOWN: {workspace_error}. Execution records are retained.")
     if not checks:
         attention.append("No verification commands recorded. Run the project's actual checks.")
     for check in latest:
@@ -248,8 +270,15 @@ def assessment(root, state):
             attention.append(f"Log {check['log_integrity']}: {label}. Inspect or rerun this check.")
         if check["workspace"] == "STALE":
             attention.append(f"STALE: {label}. Rerun against the current files.")
+        elif check["workspace"] == "UNKNOWN":
+            attention.append(f"File matching UNKNOWN: {label}. {check['capture_error'] or 'Capture is incomplete.'}")
         elif check["execution"] != "PASS":
             attention.append(f"{check['execution']}: {label}. Inspect log: {check['log']}.")
+    plan = state.get("check_runs", [{}])[-1].get("planned", [])
+    for step in plan:
+        if step["status"] in {"NOT_RUN", "RUNNING", "ERROR"}:
+            attention.append(f"{step['status']}: configured check {step['name']}. "
+                             + step.get("error", "No completed result in the latest configured run."))
     review = None
     if state.get("reviews"):
         saved = state["reviews"][-1]
@@ -260,12 +289,14 @@ def assessment(root, state):
     return {"schema_version": 1, "goal": state["goal"], "generated": now(),
             "changes": [{"kind": k, "path": p} for k, p in changed], "checks": checks,
             "latest_checks": latest,
+            "planned_checks": plan, "workspace_error": workspace_error,
             "attention": attention, "review": review, "omitted": omitted,
             "limitations": "Command receipts and file changes do not certify task completion."}
 
 
 def brief_report(data):
-    lines = ["## Review first", "", f"Changed files: {len(data['changes'])}. "
+    changes = "UNKNOWN" if data["workspace_error"] else str(len(data["changes"]))
+    lines = ["## Review first", "", f"Changed files: {changes}. "
              f"Latest successful commands with current files and intact logs: {sum(c['usable'] for c in data['latest_checks'])}.", ""]
     lines += [f"- {item}" for item in data["attention"]]
     if data["review"]:
@@ -281,13 +312,15 @@ def report(root, state, data=None):
     lines = ["# AgentProof task evidence", "", f"Goal: {state['goal']}", "",
              f"Generated: {data['generated']}", "", "This report records evidence; it does not certify correctness or task completion.",
              "", brief_report(data), "", "## Changes since task start", ""]
-    lines += [f"- {c['kind']}: `{c['path']}`" for c in data["changes"]] or ["No captured file changes."]
+    lines += ([f"- {c['kind']}: `{c['path']}`" for c in data["changes"]]
+              or ["Comparison unavailable." if data["workspace_error"] else "No captured file changes."])
     lines += ["", "Compare with the captured task baseline using `agentproof diff`."]
     lines += ["", "## Verification", ""]
     if not state["checks"]:
         lines += ["No verification commands recorded."]
     for check, evidence in zip(state["checks"], data["checks"]):
-        fresh = evidence["workspace"] == "CURRENT"
+        freshness = {"CURRENT": "matches current captured files", "STALE": "STALE / files changed",
+                     "UNKNOWN": "UNKNOWN / file matching unavailable"}[evidence["workspace"]]
         status = evidence["execution"]
         command = check["command"]
         preview = " ".join(command.split())
@@ -296,16 +329,24 @@ def report(root, state, data=None):
             preview = preview[:117] + "..."
         ticks = "`" * (max((len(x) for x in re.findall(r"`+", preview)), default=0) + 1)
         lines += [f"- **{status}** {ticks} {preview} {ticks} — recorded exit {check['exit_code']}; "
-                  f"{'matches current captured files' if fresh else 'STALE / files changed'}; "
+                  f"{freshness}; "
                   f"declared kind: {check.get('kind', 'other')}; "
                   f"log integrity: **{evidence['log_integrity']}**; "
                   f"log: `{check['log']}`"]
         if check.get("timed_out"):
-            lines += ["  Timed out; the process group was terminated."]
+            lines += ["  Timed out; process-tree termination was requested."]
+        if check.get("capture_error"):
+            lines += [f"  Capture error: {check['capture_error']}"]
+        if check.get("termination_error"):
+            lines += [f"  Termination error: {check['termination_error']}"]
         if expanded:
             fence = "`" * max(3, max((len(x) for x in re.findall(r"`+", command)), default=0) + 1)
             lines += ["", "<details>", "<summary>Full command</summary>", "",
                       fence + "sh", command, fence, "", "</details>", ""]
+    if data["planned_checks"]:
+        lines += ["", "## Latest configured run", ""]
+        lines += [f"- **{step['status']}** `{step['name']}` — declared kind: {step['kind']}"
+                  for step in data["planned_checks"]]
     lines += ["", "## Imported session signals", ""]
     for session in state["sessions"]:
         lines += ["- " + "; ".join(f"{k}: {v}" for k, v in session["metrics"].items())]
@@ -342,9 +383,10 @@ def review_claims(root, state, claims, source, current_inventory=None):
     never upgraded to VERIFIED just because it sounds confident.
     """
     current, omitted = current_inventory if current_inventory is not None else inventory(root)
-    current_fp = fingerprint(current, omitted)
+    current_fp = fingerprint(current, omitted) if current is not None else None
     baseline = get_snapshot(root, state, state["checkpoints"][0]["id"])["files"]
-    changed = [p for p in sorted(set(baseline) | set(current)) if baseline.get(p) != current.get(p)]
+    changed = ([p for p in sorted(set(baseline) | set(current)) if baseline.get(p) != current.get(p)]
+               if current is not None else [])
     checks = latest_check_records(state.get("checks", []))
     fresh_pass = [c for c in checks if check_evidence(root, c, current_fp)["usable"]]
     items, questions = [], []
@@ -377,7 +419,8 @@ def review_claims(root, state, claims, source, current_inventory=None):
         elif says_change:
             items.append({"status": "UNVERIFIED", "claim": claim,
                           "reason": (f"Observed {len(changed)} changed captured files; file changes do not establish this fix or implementation."
-                                     if changed else "No captured file changes; this does not rule out changes outside the captured scope.")})
+                                     if changed else "Captured file comparison is unavailable." if current is None else
+                                     "No captured file changes; this does not rule out changes outside the captured scope.")})
             questions.append(f"Inspect the relevant diff and a reproducible acceptance check for: {claim}")
         else:
             items.append({"status": "UNVERIFIED", "claim": claim, "reason": "没有可匹配的本地证据规则"})
@@ -444,7 +487,11 @@ def workspace_diff(root, state, selected=None):
 def write_report(root, state):
     store = root / STORE
     # A human-readable comparison, not a Git-apply or rollback artifact.
-    (store / "changes.patch").write_text(workspace_diff(root, state), encoding="utf-8")
+    try:
+        comparison = workspace_diff(root, state)
+    except (OSError, ValueError) as exc:
+        comparison = f"Comparison unavailable: {exc}\n"
+    (store / "changes.patch").write_text(comparison, encoding="utf-8")
     content = report(root, state)
     content = content.replace("Compare with the captured task baseline using `agentproof diff`.",
                               "[View captured baseline diff](changes.patch), or run `agentproof diff`.")
@@ -527,21 +574,39 @@ def run(args, root):
         raise ValueError("Run agentproof init --goal '...' first")
     state = load(store / "task.json")
     if args.action == "check":
-        failed = False
-        for check in checks:
+        planned = [{**c, "status": "NOT_RUN"} for c in checks]
+        state.setdefault("check_runs", []).append({"started": now(), "planned": planned})
+        save(store / "task.json", state)
+        outcome = 0
+        for index, check in enumerate(checks):
             print(f"Check: {check['name']} (declared kind: {check['kind']})")
-            code = run(argparse.Namespace(action="verify", command=check["command"],
-                       timeout=check["timeout"], kind=check["kind"], check_name=check["name"]), root)
-            failed = failed or code != 0
-            if code == 2:
-                return 2
-            if load(store / "task.json")["checks"][-1]["exit_code"] == 130:
+            state["check_runs"][-1]["planned"][index]["status"] = "RUNNING"
+            save(store / "task.json", state)
+            error = None
+            try:
+                code = run(argparse.Namespace(action="verify", command=check["command"],
+                           timeout=check["timeout"], kind=check["kind"], check_name=check["name"]), root)
+            except (OSError, ValueError) as exc:
+                code, error = 2, str(exc)
+                print(f"Check error: {error}")
+            outcome = max(outcome, code)
+            state = load(store / "task.json")
+            step = state["check_runs"][-1]["planned"][index]
+            step["status"] = "ERROR" if code == 2 else "FAIL" if code else "PASS"
+            if error:
+                step["error"] = error
+            interrupted = code != 2 and state["checks"][-1].get("exit_code") == 130
+            if interrupted:
+                step["status"] = "INTERRUPTED"
+            save(store / "task.json", state)
+            if code == 2 or interrupted:
                 print("Checks interrupted; remaining commands were not run.")
                 break
-        state = load(store / "task.json")
+        state["check_runs"][-1]["ended"] = now()
+        save(store / "task.json", state)
         print(brief_report(assessment(root, state)))
         print(f"Report: {write_report(root, state)}")
-        return 1 if failed else 0
+        return outcome
     elif args.action == "finish":
         destination = finish_task(root, state)
         print(f"Task archived: {destination.name}")
@@ -589,6 +654,14 @@ def run(args, root):
         log = Path(STORE) / "checks" / (uuid.uuid4().hex[:12] + ".log")
         (root / log).parent.mkdir(parents=True, exist_ok=True)
         timed_out = False
+        termination_error = None
+        import shlex
+        record = {"command": shlex.join(command), "exit_code": None,
+                  "name": getattr(args, "check_name", None), "time": now(), "before": before,
+                  "after": None, "log": str(log), "timed_out": False, "kind": args.kind,
+                  "argv": command}
+        state["checks"].append(record)
+        save(store / "task.json", state)
         with (root / log).open("wb") as output:
             try:
                 popen_kwargs = {"cwd": root, "stdout": output, "stderr": subprocess.STDOUT}
@@ -600,29 +673,38 @@ def run(args, root):
                 try:
                     code = proc.wait(timeout=args.timeout)
                 except subprocess.TimeoutExpired:
-                    terminate_process_group(proc)
                     code, timed_out = 124, True
+                    try:
+                        terminate_process_group(proc)
+                    except OSError as exc:
+                        termination_error = str(exc)
                 except KeyboardInterrupt:
-                    terminate_process_group(proc)
                     code = 130
+                    try:
+                        terminate_process_group(proc)
+                    except OSError as exc:
+                        termination_error = str(exc)
             except OSError as exc:
                 output.write(f"{command[0]}: {exc}".encode())
                 code = 127
-        after = fingerprint(*inventory(root))
-        import shlex
-        state["checks"].append({"command": shlex.join(command), "exit_code": code,
-                                "name": getattr(args, "check_name", None),
-                                "time": now(), "before": before, "after": after,
-                                "log": str(log), "timed_out": timed_out, "kind": args.kind,
-                                "argv": command,
-                                "log_sha256": file_digest(root / log)})
+        # Save the historical execution before any fallible post-command capture.
+        record.update(exit_code=code, timed_out=timed_out, ended=now(), termination_error=termination_error)
+        save(store / "task.json", state)
+        try:
+            record["log_sha256"] = file_digest(root / log)
+            record["after"] = fingerprint(*inventory(root))
+        except (OSError, ValueError) as exc:
+            record["capture_error"] = str(exc)
         save(store / "task.json", state)
         print(f"{'PASS' if code == 0 else 'FAIL'} (exit {code}). Log: {log}")
         if code != 0:
             if timed_out:
-                print(f"Timed out after {args.timeout:g}s; the process group was terminated.")
+                print(f"Timed out after {args.timeout:g}s; process-tree termination was requested.")
             print("Last command output:")
             print(log_tail(root / log))
+        if record.get("capture_error"):
+            print(f"Execution retained; file matching UNKNOWN: {record['capture_error']}")
+            return 2
         return 0 if code == 0 else 1
     elif args.action in ("report", "status"):
         if args.action == "report":

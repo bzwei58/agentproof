@@ -6,10 +6,12 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
 from agentproof.cli import main
+from helpers import cleanup_temp
 
 
 class WorkflowTest(unittest.TestCase):
@@ -23,7 +25,7 @@ class WorkflowTest(unittest.TestCase):
 
     def tearDown(self):
         os.chdir(self.cwd)
-        self.temp.cleanup()
+        cleanup_temp(self.temp)
 
     def cli(self, *args):
         out = io.StringIO()
@@ -77,6 +79,58 @@ class WorkflowTest(unittest.TestCase):
         self.assertIn('remaining commands were not run', output)
         self.assertFalse((self.root / 'marker').exists())
         self.assertTrue((self.root / '.agentproof/report.md').is_file())
+        data = json.loads(self.cli('status', '--json')[1])
+        self.assertEqual([x['status'] for x in data['planned_checks']], ['INTERRUPTED', 'NOT_RUN'])
+        self.assertIn('never-run', (self.root / '.agentproof/report.md').read_text(encoding='utf-8'))
+
+    def test_post_command_capture_failure_keeps_execution_and_report(self):
+        self.config([self.check(name='oversize', script='from pathlib import Path; '
+                                'Path("large.bin").write_bytes(b"x" * (11 * 1024 * 1024)); print("completed")'),
+                     self.check(name='not-executed')])
+        self.init()
+        code, output = self.cli('check')
+        self.assertEqual(code, 2, output)
+        data = json.loads(self.cli('status', '--json')[1])
+        self.assertEqual(data['checks'][0]['exit_code'], 0)
+        self.assertEqual(data['checks'][0]['workspace'], 'UNKNOWN')
+        self.assertFalse(data['checks'][0]['usable'])
+        self.assertEqual([x['status'] for x in data['planned_checks']], ['ERROR', 'NOT_RUN'])
+        self.assertIn('completed', (self.root / data['checks'][0]['log']).read_text(encoding='utf-8'))
+        self.assertIn('Comparison unavailable', (self.root / '.agentproof/changes.patch').read_text(encoding='utf-8'))
+        self.assertTrue((self.root / '.agentproof/report.md').is_file())
+        (self.root / 'large.bin').unlink()
+        self.assertEqual(json.loads(self.cli('status', '--json')[1])['checks'][0]['workspace'], 'UNKNOWN')
+
+    def test_pending_execution_never_becomes_pass_evidence(self):
+        self.init()
+        self.cli('verify', '--kind', 'test', '--', sys.executable, '-c', 'print("ok")')
+        path = self.root / '.agentproof/task.json'
+        state = json.loads(path.read_text(encoding='utf-8'))
+        state['checks'][-1].update(exit_code=None, after=None)
+        path.write_text(json.dumps(state), encoding='utf-8')
+        data = json.loads(self.cli('status', '--json')[1])
+        self.assertEqual(data['checks'][0]['execution'], 'UNKNOWN')
+        self.assertFalse(data['checks'][0]['usable'])
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows process-tree regression')
+    def test_windows_timeout_stops_child_writes(self):
+        self.init()
+        child = ('import os,time; from pathlib import Path; '
+                 'Path(".agentproof/child-pid").write_text(str(os.getpid())); '
+                 '\nwhile True:\n Path(".agentproof/heartbeat").write_text(str(time.monotonic())); time.sleep(0.05)')
+        parent = f'import subprocess,sys,time; subprocess.Popen([sys.executable,"-c",{child!r}]); time.sleep(60)'
+        try:
+            code, output = self.cli('verify', '--timeout', '3', '--', sys.executable, '-c', parent)
+            self.assertEqual(code, 1, output)
+            heartbeat = self.root / '.agentproof/heartbeat'
+            self.assertTrue(heartbeat.is_file(), 'Child must have started for this regression to be meaningful')
+            before = heartbeat.read_bytes()
+            time.sleep(0.4)
+            self.assertEqual(heartbeat.read_bytes(), before)
+        finally:
+            pid_path = self.root / '.agentproof/child-pid'
+            if pid_path.exists():
+                subprocess.run(['taskkill', '/PID', pid_path.read_text(), '/T', '/F'], capture_output=True)
 
     def test_latest_success_replaces_failure_in_review_priorities(self):
         self.config([self.check(script='from pathlib import Path; '

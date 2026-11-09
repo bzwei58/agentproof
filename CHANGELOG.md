@@ -2,6 +2,13 @@
 
 All notable changes to AgentProof are documented here.
 
+## 0.4.1 — 2026-11-09
+
+- Persist pending and completed execution receipts before fallible workspace capture.
+- Keep reports available with UNKNOWN file matching when capture exceeds limits or fails.
+- Save full configured run plans and list interrupted, errored and unexecuted checks.
+- Request Windows process-tree termination and preserve timeout/termination diagnostics.
+
 ## 0.4.0 — 2026-11-09
 
 - Put actionable review priorities first, with separate execution, freshness and log integrity states.

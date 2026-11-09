@@ -10,6 +10,7 @@ import unittest
 
 from agentproof.cli import main, safe_path
 from agentproof import __version__
+from helpers import cleanup_temp
 
 
 class CLITest(unittest.TestCase):
@@ -25,7 +26,7 @@ class CLITest(unittest.TestCase):
 
     def tearDown(self):
         os.chdir(self.cwd)
-        self.temp.cleanup()
+        cleanup_temp(self.temp)
 
     def cli(self, *args):
         out = io.StringIO()
