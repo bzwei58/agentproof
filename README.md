@@ -54,7 +54,7 @@ that repository's root. One active task is supported per checkout; use a worktre
    explicitly use `sh -c '...'` if you need shell syntax. Only run commands you trust.
 5. **Optionally import session signals.** `agentproof import-session /path/to/session.jsonl`.
 6. **Review AI claims.** `agentproof review --summary ai-summary.txt` (one claim per line), or repeat
-   `--claim "All tests passed"`. It reports `OBSERVED`, `UNVERIFIED` and `CONFLICT`; natural-language claims are not certified.
+   `--claim "All tests passed"`. Completion claims remain `UNVERIFIED`; matching command receipts are shown separately.
 7. **Review.** `agentproof status` prints evidence; `agentproof report` writes Markdown.
 8. **Recover selected snapshot contents.** `agentproof restore CHECKPOINT_ID` previews changes;
    add `--apply` to write them, after an automatic backup checkpoint.
@@ -128,21 +128,19 @@ Ideas for later: task history, more session adapters, configurable snapshot scop
 CI handoff artifacts. Contributions should preserve the distinction between observed facts
 and model-generated claims. Please include a reproducible example and tests for behavior changes.
 
-## Evidence matching in 0.3.0
+## Evidence matching in 0.3.1
 
-Declare each check with `verify --kind test|lint|build|other -- COMMAND`. This is a
-user-supplied category, not a certification. Old records remain usable as command
-history but do not acquire a check category automatically.
+Declare each check with `verify --kind test|lint|build|other -- COMMAND`. The category is
+user-supplied, not a certification. Completion claims stay `UNVERIFIED`, including when
+files changed or a declared test command returned zero. Matching command receipts are
+listed separately; they do not establish test execution, count, coverage or requirements.
 
-Natural-language completion claims are never certified as `VERIFIED`. `OBSERVED`
-means a corresponding category of command exited 0 with an intact log and matching
-captured files; inspect the named command and output to confirm scope and test count.
-A build cannot support a test claim. Missing, stale, failed, or modified evidence leaves
-the claim `UNVERIFIED`. Reviews are recalculated on every `status` or `report` call.
-Already exported Markdown is a static snapshot and must be regenerated after changes.
-External services, ignored dependencies and environment changes remain outside the fingerprint.
+Reports distinguish historical command execution, current captured file matching and log
+integrity (`INTACT`, `MODIFIED`, `MISSING`, `UNRECORDED` or `UNREADABLE`). Only successful,
+current checks with intact logs can appear as matching receipts. Both `status` and `report`
+recompute these facts; exported Markdown remains a static snapshot. Local hashes detect
+some changes; they are not independent proof against someone rewriting the evidence store.
+Ignored dependencies, external services and environment changes remain outside scope.
 
-Session import recognizes Claude message blocks and Codex rollout `response_item.payload`
-tool events plus `compacted` records. Opaque outputs do not establish command success.
-Cline and Cursor native formats are not yet validated; generic top-level event counting
-must not be interpreted as full client support.
+Session import recognizes Claude message blocks and Codex `response_item.payload` and
+`compacted` events. Native Cline/Cursor formats remain unvalidated.

@@ -2,6 +2,13 @@
 
 All notable changes to AgentProof are documented here.
 
+## 0.3.1 — 2026-11-09
+
+- Keep completion claims UNVERIFIED; show command receipts separately from claim status.
+- Never treat unrelated captured file changes as evidence of a fix.
+- Show historical execution, workspace freshness and log integrity independently.
+- Reuse the same integrity rules in reports and claim matching, with bounded-memory log hashing.
+
 ## 0.3.0 — 2026-11-09
 
 - Remove natural-language VERIFIED claims; show only scoped observed command receipts.

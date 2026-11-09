@@ -306,8 +306,10 @@ class CLITest(unittest.TestCase):
                                  '-B', '-m', 'unittest', 'discover')[0], 0)
         code, output = self.cli('review', '--claim', 'Fixed the bug', '--claim', 'All tests passed')
         self.assertEqual(code, 0, output)
-        self.assertIn('OBSERVED: Fixed the bug', output)
-        self.assertIn('OBSERVED: All tests passed', output)
+        self.assertIn('UNVERIFIED: Fixed the bug', output)
+        self.assertIn('UNVERIFIED: All tests passed', output)
+        self.assertIn('Receipt: Recorded exit 0 for:', output)
+        self.assertIn('declared kind: test', output)
         self.assertEqual(self.cli('report')[0], 0)
         report = (self.root / '.agentproof/report.md').read_text(encoding='utf-8')
         self.assertIn('## Claim review', report)
@@ -326,7 +328,7 @@ class CLITest(unittest.TestCase):
         summary.write_text('Implemented the change\nNo external verification was performed\n')
         code, output = self.cli('review', '--summary', str(summary))
         self.assertEqual(code, 0, output)
-        self.assertIn('OBSERVED: Implemented the change', output)
+        self.assertIn('UNVERIFIED: Implemented the change', output)
         self.assertIn('UNVERIFIED: No external verification was performed', output)
 
     def test_review_does_not_treat_arbitrary_success_as_test_evidence(self):
@@ -347,19 +349,56 @@ class CLITest(unittest.TestCase):
         self.init()
         self.cli('verify', '--kind', 'test', '--', sys.executable, '-c', 'print("one check")')
         self.cli('review', '--claim', 'All tests passed')
-        self.assertIn('**OBSERVED** All tests passed', self.cli('status')[1])
+        self.assertIn('Receipt: Recorded exit 0 for:', self.cli('status')[1])
         log = self.root / self.state()['checks'][-1]['log']
         log.write_text('tampered')
-        self.assertIn('**UNVERIFIED** All tests passed', self.cli('status')[1])
+        report = self.cli('status')[1]
+        self.assertIn('log integrity: **MODIFIED**', report)
+        self.assertNotIn('Receipt: Recorded exit 0 for:', report)
         self.cli('verify', '--kind', 'test', '--', sys.executable, '-c', 'print("one check")')
         self.file.write_text('changed')
-        self.assertIn('**UNVERIFIED** All tests passed', self.cli('status')[1])
+        report = self.cli('status')[1]
+        self.assertIn('**UNVERIFIED** All tests passed', report)
+        self.assertNotIn('Receipt: Recorded exit 0 for:', report)
+
+    def test_unrelated_change_does_not_support_fix_claim(self):
+        self.init()
+        (self.root / 'README.md').write_text('Spelling correction\n')
+        output = self.cli('review', '--claim', '修复了支付重试的重复扣款问题')[1]
+        self.assertIn('UNVERIFIED:', output)
+        self.assertNotIn('OBSERVED:', output)
+        self.assertIn('do not establish this fix', output)
+
+    def test_declared_test_category_is_only_a_receipt(self):
+        self.init()
+        self.cli('verify', '--kind', 'test', '--', sys.executable, '-c', 'print("zero actual tests")')
+        output = self.cli('review', '--claim', 'All tests passed')[1]
+        self.assertIn('UNVERIFIED: All tests passed', output)
+        self.assertIn('Receipt: Recorded exit 0 for:', output)
+        self.assertIn('user-declared', output)
+        self.assertNotIn('OBSERVED: All tests passed', output)
+
+    def test_missing_and_legacy_logs_have_explicit_integrity(self):
+        self.init()
+        self.cli('verify', '--kind', 'test', '--', sys.executable, '-c', 'print("ok")')
+        self.cli('review', '--claim', 'Tests passed')
+        state = self.state()
+        log = self.root / state['checks'][-1]['log']
+        log.unlink()
+        report = self.cli('status')[1]
+        self.assertIn('log integrity: **MISSING**', report)
+        self.assertNotIn('Receipt: Recorded exit 0 for:', report)
+        del state['checks'][-1]['log_sha256']
+        (self.root / '.agentproof/task.json').write_text(json.dumps(state))
+        report = self.cli('status')[1]
+        self.assertIn('log integrity: **UNRECORDED**', report)
+        self.assertNotIn('Receipt: Recorded exit 0 for:', report)
 
     def test_chinese_and_negated_claims_are_conservative(self):
         self.init()
         self.cli('verify', '--kind', 'test', '--', sys.executable, '-c', 'print("ok")')
         output = self.cli('review', '--claim', '所有测试通过', '--claim', 'Tests did not pass')[1]
-        self.assertIn('OBSERVED: 所有测试通过', output)
+        self.assertIn('UNVERIFIED: 所有测试通过', output)
         self.assertIn('UNVERIFIED: Tests did not pass', output)
 
     def test_review_counts_deleted_files_as_changes(self):
@@ -367,7 +406,7 @@ class CLITest(unittest.TestCase):
         self.file.unlink()
         code, output = self.cli('review', '--claim', 'Fixed the bug')
         self.assertEqual(code, 0, output)
-        self.assertIn('OBSERVED: Fixed the bug', output)
+        self.assertIn('UNVERIFIED: Fixed the bug', output)
 
     def test_report_compacts_multiline_commands_without_losing_evidence(self):
         self.init()
@@ -376,7 +415,7 @@ class CLITest(unittest.TestCase):
         self.assertEqual(self.cli('report')[0], 0)
         content = (self.root / '.agentproof/report.md').read_text()
         summary = next(line for line in content.splitlines() if line.startswith('- **PASS**'))
-        self.assertLess(len(summary), 300)
+        self.assertLess(len(summary), 400)
         self.assertIn('<summary>Full command</summary>', content)
         self.assertIn(self.state()['checks'][-1]['command'], content)
         self.assertIn('````sh', content)
