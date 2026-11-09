@@ -128,7 +128,7 @@ Ideas for later: task history, more session adapters, configurable snapshot scop
 CI handoff artifacts. Contributions should preserve the distinction between observed facts
 and model-generated claims. Please include a reproducible example and tests for behavior changes.
 
-## Evidence matching in the next release
+## Evidence matching in 0.3.0
 
 Declare each check with `verify --kind test|lint|build|other -- COMMAND`. This is a
 user-supplied category, not a certification. Old records remain usable as command
