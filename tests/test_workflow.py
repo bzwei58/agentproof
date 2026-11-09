@@ -141,7 +141,7 @@ class WorkflowTest(unittest.TestCase):
         self.init()
         (self.root / 'app.py').write_bytes(b'binary\0data')
         self.assertIn('Binary or non-UTF-8', self.cli('diff')[1])
-        state = json.loads((self.root / '.agentproof/task.json').read_text())
+        state = json.loads((self.root / '.agentproof/task.json').read_text(encoding="utf-8"))
         snapshot = self.root / '.agentproof/snapshots' / state['checkpoints'][0]['id'] / 'files/app.py'
         snapshot.write_text('corrupt')
         code, output = self.cli('diff')
@@ -151,7 +151,7 @@ class WorkflowTest(unittest.TestCase):
     def test_brief_and_json_surface_bad_logs_without_claims(self):
         self.init()
         self.cli('verify', '--', sys.executable, '-c', 'print("ok")')
-        state = json.loads((self.root / '.agentproof/task.json').read_text())
+        state = json.loads((self.root / '.agentproof/task.json').read_text(encoding="utf-8"))
         (self.root / state['checks'][-1]['log']).unlink()
         self.assertIn('Log MISSING:', self.cli('status', '--brief')[1])
         data = json.loads(self.cli('status', '--json')[1])
@@ -166,7 +166,7 @@ class WorkflowTest(unittest.TestCase):
         output = self.cli('status')[1]
         self.assertNotIn('Old claim', output)
         self.assertIn('New claim', output)
-        state = json.loads((self.root / '.agentproof/task.json').read_text())
+        state = json.loads((self.root / '.agentproof/task.json').read_text(encoding="utf-8"))
         self.assertEqual(len(state['reviews']), 2)
 
     def test_finish_preserves_evidence_and_allows_next_task(self):
@@ -180,13 +180,13 @@ class WorkflowTest(unittest.TestCase):
         history = list((self.root / '.agentproof/history').iterdir())
         self.assertEqual(len(history), 1)
         archive = history[0]
-        self.assertIn('Review workflow', (archive / 'report.md').read_text())
-        self.assertIn('+new', (archive / 'changes.patch').read_text())
+        self.assertIn('Review workflow', (archive / 'report.md').read_text(encoding="utf-8"))
+        self.assertIn('+new', (archive / 'changes.patch').read_text(encoding="utf-8"))
         self.assertEqual(len(list((archive / 'checks').glob('*.log'))), 1)
-        self.assertNotIn('.agentproof/checks/', (archive / 'report.md').read_text())
+        self.assertNotIn('.agentproof/checks/', (archive / 'report.md').read_text(encoding="utf-8"))
         self.assertTrue((archive / 'snapshots').is_dir())
         self.assertEqual(subprocess.check_output(['git', 'diff', '--cached']), staged_before)
-        self.assertEqual((self.root / 'app.py').read_text(), 'new\n')
+        self.assertEqual((self.root / 'app.py').read_text(encoding="utf-8"), 'new\n')
         self.assertIn(archive.name, self.cli('history')[1])
         self.init()
         self.assertEqual(self.cli('finish')[0], 0)
