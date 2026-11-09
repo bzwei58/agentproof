@@ -72,7 +72,7 @@ agentproof restore CHECKPOINT_ID --apply
 - 记录命令真实退出码、输出和超时；检查自己改了文件也会标记为旧证据。
 - 导入 Claude Code 风格 JSONL，统计工具调用、工具错误、上下文压缩、截断标记及坏行。
 - 生成本地 Markdown 报告，明确记录已知事实与未验证范围。
-- `review` 将 AI 的完成声明与文件变化、最新检查结果匹配，分为 **VERIFIED（已验证）**、**OBSERVED（已观察）**、**UNVERIFIED（未验证）** 和 **CONFLICT（矛盾）**。
+- `review` 将 AI 的完成声明与文件变化、最新检查结果匹配，分为 **OBSERVED（已观察）**、**UNVERIFIED（未验证）** 和 **CONFLICT（矛盾）**，不认证自然语言声明。
 
 ## 边界
 

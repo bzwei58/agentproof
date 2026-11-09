@@ -54,7 +54,7 @@ that repository's root. One active task is supported per checkout; use a worktre
    explicitly use `sh -c '...'` if you need shell syntax. Only run commands you trust.
 5. **Optionally import session signals.** `agentproof import-session /path/to/session.jsonl`.
 6. **Review AI claims.** `agentproof review --summary ai-summary.txt` (one claim per line), or repeat
-   `--claim "All tests passed"`. It reports `VERIFIED`, `OBSERVED`, `UNVERIFIED` and `CONFLICT`.
+   `--claim "All tests passed"`. It reports `OBSERVED`, `UNVERIFIED` and `CONFLICT`; natural-language claims are not certified.
 7. **Review.** `agentproof status` prints evidence; `agentproof report` writes Markdown.
 8. **Recover selected snapshot contents.** `agentproof restore CHECKPOINT_ID` previews changes;
    add `--apply` to write them, after an automatic backup checkpoint.
