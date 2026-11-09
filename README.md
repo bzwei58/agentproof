@@ -86,6 +86,21 @@ when applicable. Successful commands stay quiet. The full log is always retained
 
 ## What is recorded
 
+### Reported test results (0.5.0+)
+
+For a project already using pytest, run:
+
+```bash
+agentproof verify --kind test --junit -- python -m pytest '--junitxml={junit}'
+```
+
+The report shows reporter-provided test counts, failures, errors and skips, with
+bounded failure details. Every execution gets a unique output path. Missing, invalid, inconsistent,
+modified, zero-test or skipped-only results need review; a zero command exit does not
+override failed test results. [JUnit usage and boundaries](docs/junit.md).
+
+### Captured evidence
+
 - SHA-256 fingerprints and modes of captured files, plus full file checkpoints.
 - Added, modified and deleted files relative to the task's initial checkpoint.
 - Actual verification command, exit status, output log and before/after fingerprints.

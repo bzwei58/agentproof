@@ -2,6 +2,15 @@
 
 All notable changes to AgentProof are documented here.
 
+## 0.5.0 — 2026-11-09
+
+- Read bounded UTF-8 JUnit XML via a unique per-execution `{junit}` command placeholder.
+- Show reported test counts, failures, errors, skips and bounded failure locations in review priorities.
+- Reject malformed reports and expose inconsistent suite/case totals; zero-test, skipped-only and failing reports return 1 even with command exit 0.
+- Recheck result-file integrity and revoke usable evidence for modified or missing XML.
+- Support `verify --junit` and configured `result_format: junit`; preserve source XML in archives.
+- Keep natural-language claims UNVERIFIED and clearly label parsed results as reporter-provided.
+
 ## 0.4.1 — 2026-11-09
 
 - Persist pending and completed execution receipts before fallible workspace capture.
