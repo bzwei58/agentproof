@@ -38,8 +38,8 @@ agentproof init --goal "修复支付重试逻辑"
 agentproof checkpoint --label "第一次实现"
 
 # 主动运行项目已有的检查；工具记录退出码和日志
-agentproof verify -- python -m unittest discover -s tests
-agentproof verify --timeout 60 -- npm run lint
+agentproof verify --kind test -- python -m unittest discover -s tests
+agentproof verify --kind lint --timeout 60 -- npm run lint
 
 # 可选：导入 Claude Code JSONL 会话的基础信号统计
 agentproof import-session /path/to/session.jsonl
@@ -72,7 +72,7 @@ agentproof restore CHECKPOINT_ID --apply
 - 记录命令真实退出码、输出和超时；检查自己改了文件也会标记为旧证据。
 - 导入 Claude Code 风格 JSONL，统计工具调用、工具错误、上下文压缩、截断标记及坏行。
 - 生成本地 Markdown 报告，明确记录已知事实与未验证范围。
-- `review` 将 AI 的完成声明与文件变化、最新检查结果匹配，分为 **VERIFIED（已验证）**、**OBSERVED（已观察）**、**UNVERIFIED（未验证）** 和 **CONFLICT（矛盾）**。
+- `review` 将 AI 的完成声明与文件变化、最新检查结果匹配，分为 **OBSERVED（已观察）**、**UNVERIFIED（未验证）** 和 **CONFLICT（矛盾）**，不认证自然语言声明。
 
 ## 边界
 
@@ -108,3 +108,16 @@ python3 -m agentproof --help
 愿意在两个真实任务中试用？查看[试用指南和反馈表](docs/pilot.md)。
 
 MIT 开源协议。欢迎提交可复现问题、会话格式样例或带测试的 PR。
+
+## 下一版本的证据匹配
+
+使用 `verify --kind test|lint|build|other -- COMMAND` 明确声明检查类型。
+类型由调用者提供，不是认证；旧检查不会自动获得类型。
+自然语言声明不再标记为 `VERIFIED`。`OBSERVED` 仅表示同类型命令返回 0、
+日志完整且与当前捕获文件一致，仍需查看命令和日志确认覆盖范围及测试数量。
+构建结果不能支撑测试声明；过期、缺失或被修改的证据会得到 `UNVERIFIED`。
+每次 `status` 或 `report` 重新计算审查结论；已导出的 Markdown 是静态快照，需要重新生成。
+外部服务、被忽略的依赖和环境变化尚不在指纹范围。
+
+会话导入识别 Claude 消息块与 Codex 的 `response_item.payload`、`compacted` 记录。
+Cline、Cursor 原生格式尚未验证；通用事件统计不等于完整支持。

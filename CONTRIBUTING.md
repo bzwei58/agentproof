@@ -36,3 +36,10 @@ A pull request should state:
 - any compatibility or evidence limitations.
 
 Reviewers should reject claims that are not backed by a reproducible test or a clearly documented observation.
+
+## Current maintainer policy
+
+All main changes require a pull request, the nine platform CI checks, and resolved
+conversations. During single-maintainer operation the required approval count is zero;
+request independent reviews when available and raise it when another maintainer joins.
+Merged branches are deleted automatically. Never bypass checks to release.

@@ -4,6 +4,12 @@ All notable changes to AgentProof are documented here.
 
 ## Unreleased
 
+- Remove natural-language VERIFIED claims; show only scoped observed command receipts.
+- Require explicit check categories; never infer verification from command keywords.
+- Recompute saved reviews and reject missing or modified logs.
+- Recognize Codex nested tool events and clarify unvalidated client formats.
+- Validate release tag against package metadata before PyPI publishing.
+
 - Add Windows process timeout handling and Windows CI coverage.
 - Add top-level tool event counting for common non-Claude session JSONL formats.
 - Add security and privacy guidance for local evidence and command execution.
