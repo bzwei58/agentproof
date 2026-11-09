@@ -10,7 +10,7 @@ AgentProof answers those questions without another model or an API key.
 ```text
 $ agentproof init --goal "Fix payment retries"
 Task initialized. Baseline: ... (42 files)
-$ agentproof verify -- python -m unittest discover -s tests
+$ agentproof verify --kind test -- python -m unittest discover -s tests
 PASS (exit 0). Log: .agentproof/checks/....log
 $ agentproof report
 /path/to/project/.agentproof/report.md
@@ -49,7 +49,7 @@ that repository's root. One active task is supported per checkout; use a worktre
    local changes too, without creating commits or touching the Git index.
 2. Let your existing coding agent work. AgentProof does not launch or intercept it.
 3. **Save a milestone.** `agentproof checkpoint --label "first implementation"`.
-4. **Run real checks.** `agentproof verify -- python -m unittest discover -s tests`.
+4. **Run real checks.** `agentproof verify --kind test -- python -m unittest discover -s tests`.
    Run each test, lint or build command separately. Shell operators are not interpreted;
    explicitly use `sh -c '...'` if you need shell syntax. Only run commands you trust.
 5. **Optionally import session signals.** `agentproof import-session /path/to/session.jsonl`.
@@ -127,3 +127,22 @@ partial session logs. GitHub Actions runs them on macOS/Linux and Python 3.10/3.
 Ideas for later: task history, more session adapters, configurable snapshot scope, optional
 CI handoff artifacts. Contributions should preserve the distinction between observed facts
 and model-generated claims. Please include a reproducible example and tests for behavior changes.
+
+## Evidence matching in the next release
+
+Declare each check with `verify --kind test|lint|build|other -- COMMAND`. This is a
+user-supplied category, not a certification. Old records remain usable as command
+history but do not acquire a check category automatically.
+
+Natural-language completion claims are never certified as `VERIFIED`. `OBSERVED`
+means a corresponding category of command exited 0 with an intact log and matching
+captured files; inspect the named command and output to confirm scope and test count.
+A build cannot support a test claim. Missing, stale, failed, or modified evidence leaves
+the claim `UNVERIFIED`. Reviews are recalculated on every `status` or `report` call.
+Already exported Markdown is a static snapshot and must be regenerated after changes.
+External services, ignored dependencies and environment changes remain outside the fingerprint.
+
+Session import recognizes Claude message blocks and Codex rollout `response_item.payload`
+tool events plus `compacted` records. Opaque outputs do not establish command success.
+Cline and Cursor native formats are not yet validated; generic top-level event counting
+must not be interpreted as full client support.

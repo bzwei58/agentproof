@@ -235,6 +235,23 @@ class CLITest(unittest.TestCase):
         self.assertEqual(state['sessions'][0]['metrics']['truncation_markers'], 1)
         self.assertNotIn('DO_NOT_COPY', json.dumps(state))
 
+    def test_codex_response_items_and_compaction(self):
+        self.init()
+        fixture = self.root / '.agentproof/rollout.jsonl'
+        rows = [
+            {'type': 'response_item', 'payload': {'type': 'function_call', 'arguments': 'SECRET'}},
+            {'type': 'response_item', 'payload': {'type': 'function_call_output', 'output': 'truncated'}},
+            {'type': 'response_item', 'payload': {'type': 'message', 'content': []}},
+            {'type': 'compacted', 'payload': {'message': 'SECRET'}},
+        ]
+        fixture.write_text('\n'.join(json.dumps(r) for r in rows), encoding='utf-8')
+        self.assertEqual(self.cli('import-session', str(fixture))[0], 0)
+        metrics = self.state()['sessions'][0]['metrics']
+        self.assertEqual(metrics['tool_calls'], 1)
+        self.assertEqual(metrics['compactions'], 1)
+        self.assertEqual(metrics['truncation_markers'], 1)
+        self.assertNotIn('SECRET', json.dumps(self.state()))
+
     def test_sensitive_ignored_and_symlink_files_excluded(self):
         (self.root / '.env').write_text('secret')
         (self.root / '.gitignore').write_text('ignored.txt\n')
@@ -280,13 +297,17 @@ class CLITest(unittest.TestCase):
         self.assertIn('does not certify correctness', content)
 
     def test_review_matches_fresh_test_and_reports_missing_evidence(self):
+        (self.root / 'test_example.py').write_text(
+            'import unittest\nclass Example(unittest.TestCase):\n'
+            '    def test_example(self): self.assertEqual(2 + 2, 4)\n')
         self.init()
         self.file.write_text('print("changed")\n')
-        self.assertEqual(self.cli('verify', '--', sys.executable, '-c', 'print("ok") # test')[0], 0)
+        self.assertEqual(self.cli('verify', '--kind', 'test', '--', sys.executable,
+                                 '-B', '-m', 'unittest', 'discover')[0], 0)
         code, output = self.cli('review', '--claim', 'Fixed the bug', '--claim', 'All tests passed')
         self.assertEqual(code, 0, output)
         self.assertIn('OBSERVED: Fixed the bug', output)
-        self.assertIn('VERIFIED: All tests passed', output)
+        self.assertIn('OBSERVED: All tests passed', output)
         self.assertEqual(self.cli('report')[0], 0)
         report = (self.root / '.agentproof/report.md').read_text(encoding='utf-8')
         self.assertIn('## Claim review', report)
@@ -297,7 +318,7 @@ class CLITest(unittest.TestCase):
         self.file.write_text('changed after test')
         code, output = self.cli('review', '--claim', 'Tests passed')
         self.assertEqual(code, 0, output)
-        self.assertIn('CONFLICT: Tests passed', output)
+        self.assertIn('UNVERIFIED: Tests passed', output)
 
     def test_review_can_read_summary_file(self):
         self.init()
@@ -313,7 +334,33 @@ class CLITest(unittest.TestCase):
         self.assertEqual(self.cli('verify', '--', sys.executable, '-c', 'print("ok")')[0], 0)
         code, output = self.cli('review', '--claim', 'All tests passed')
         self.assertEqual(code, 0, output)
-        self.assertIn('CONFLICT: All tests passed', output)
+        self.assertIn('UNVERIFIED: All tests passed', output)
+
+    def test_review_comment_and_wrong_kind_cannot_prove_tests(self):
+        self.init()
+        self.cli('verify', '--', sys.executable, '-c', 'print("ok") # test')
+        self.cli('verify', '--kind', 'build', '--', sys.executable, '-c', 'print("build ok")')
+        output = self.cli('review', '--claim', 'All tests passed')[1]
+        self.assertIn('UNVERIFIED: All tests passed', output)
+
+    def test_report_recomputes_review_after_edits_and_log_tampering(self):
+        self.init()
+        self.cli('verify', '--kind', 'test', '--', sys.executable, '-c', 'print("one check")')
+        self.cli('review', '--claim', 'All tests passed')
+        self.assertIn('**OBSERVED** All tests passed', self.cli('status')[1])
+        log = self.root / self.state()['checks'][-1]['log']
+        log.write_text('tampered')
+        self.assertIn('**UNVERIFIED** All tests passed', self.cli('status')[1])
+        self.cli('verify', '--kind', 'test', '--', sys.executable, '-c', 'print("one check")')
+        self.file.write_text('changed')
+        self.assertIn('**UNVERIFIED** All tests passed', self.cli('status')[1])
+
+    def test_chinese_and_negated_claims_are_conservative(self):
+        self.init()
+        self.cli('verify', '--kind', 'test', '--', sys.executable, '-c', 'print("ok")')
+        output = self.cli('review', '--claim', '所有测试通过', '--claim', 'Tests did not pass')[1]
+        self.assertIn('OBSERVED: 所有测试通过', output)
+        self.assertIn('UNVERIFIED: Tests did not pass', output)
 
     def test_review_counts_deleted_files_as_changes(self):
         self.init()

@@ -147,6 +147,19 @@ def import_session(path):
             metrics["records"] += 1
             if record.get("type") == "system" and record.get("subtype") == "compact_boundary":
                 metrics["compactions"] += 1
+            # Codex rollout response items wrap API events in payload.
+            payload = record.get("payload")
+            if record.get("type") == "response_item" and isinstance(payload, dict):
+                if payload.get("type") in {"function_call", "custom_tool_call"}:
+                    metrics["tool_calls"] += 1
+                elif payload.get("type") in {"function_call_output", "custom_tool_call_output"}:
+                    output = payload.get("output", "")
+                    # Do not infer errors from prose; rollout output is opaque.
+                    metrics["tool_errors"] += bool(payload.get("is_error"))
+                    if re.search(r"\btruncated\b", str(output), re.I):
+                        metrics["truncation_markers"] += 1
+            if record.get("type") == "compacted":
+                metrics["compactions"] += 1
             message = record.get("message")
             content = message.get("content", []) if isinstance(message, dict) else []
             if not isinstance(content, list):
@@ -224,11 +237,12 @@ def report(root, state):
         lines += ["", "## Claim review", ""]
         for review in state["reviews"]:
             lines += [f"Reviewed: `{review['source']}` ({review['time']})", ""]
-            for item in review["items"]:
+            latest = review_claims(root, state, [x["claim"] for x in review["items"]], review["source"])
+            for item in latest["items"]:
                 lines.append(f"- **{item['status']}** {item['claim']} — {item['reason']}")
-            if review.get("questions"):
+            if latest.get("questions"):
                 lines += ["", "### Human confirmation", ""]
-                lines += [f"- {question}" for question in review["questions"]]
+                lines += [f"- {question}" for question in latest["questions"]]
     return "\n".join(lines) + "\n"
 
 
@@ -243,29 +257,40 @@ def review_claims(root, state, claims, source):
     baseline = get_snapshot(root, state, state["checkpoints"][0]["id"])["files"]
     changed = [p for p in sorted(set(baseline) | set(current)) if baseline.get(p) != current.get(p)]
     checks = state.get("checks", [])
-    verification_words = re.compile(r"\b(test|tests|pytest|unittest|jest|vitest|mocha|lint|format|build|compile|check|检查|测试|构建|编译)\b", re.I)
-    fresh_pass = [c for c in checks if c["exit_code"] == 0 and c["before"] == c["after"] == current_fp
-                  and verification_words.search(c["command"])]
+    fresh_pass = [c for c in checks if c["exit_code"] == 0 and c["before"] == c["after"] == current_fp]
     items, questions = [], []
     for raw in claims:
         claim = " ".join(raw.strip().split())
         if not claim:
             continue
         lower = claim.lower()
-        is_test = bool(re.search(r"\b(test|tests|pytest|unittest|lint|build|check|检查|测试|构建)\b", lower))
-        says_pass = bool(re.search(r"\b(pass|passed|passing|success|successful|green|通过|成功|完成)\b", lower))
-        says_change = bool(re.search(r"\b(fix|fixed|change|changed|implement|implemented|修复|修改|实现)\b", lower))
-        if is_test and says_pass:
-            if fresh_pass:
-                items.append({"status": "VERIFIED", "claim": claim,
-                              "reason": f"{len(fresh_pass)} 个成功检查与当前文件指纹一致"})
-            elif checks:
-                items.append({"status": "CONFLICT", "claim": claim,
-                              "reason": "检查存在，但没有一个成功结果仍与当前文件一致"})
-                questions.append("重新运行与该声明对应的测试、构建或 lint，并确认结果匹配当前代码。")
+        kind = next((k for k, pattern in (
+            ("test", r"\b(?:tests?|pytest|unittest)\b|测试"),
+            ("lint", r"\blint\b|静态检查"),
+            ("build", r"\bbuild\b|构建")) if re.search(pattern, lower)), None)
+        says_pass = bool(re.search(r"\b(?:pass|passed|passing|success|successful|green)\b|通过|成功", lower))
+        says_change = bool(re.search(r"\b(?:fix|fixed|change|changed|implement|implemented)\b|修复|修改|实现", lower))
+        negated = bool(re.search(r"\b(?:not|never|no|failed)\b|未|没有|失败|不", lower))
+        if negated:
+            items.append({"status": "UNVERIFIED", "claim": claim,
+                          "reason": "Negative or qualified statement; inspect the original evidence."})
+            questions.append(f"Confirm the stated limitation: {claim}")
+        elif kind and says_pass:
+            matching = [c for c in fresh_pass if c.get("kind") == kind]
+            evidence = []
+            for c in matching:
+                log = root / c["log"]
+                if (c.get("log_sha256") and log.is_file() and
+                        hashlib.sha256(log.read_bytes()).hexdigest() == c["log_sha256"]):
+                    evidence.append(c)
+            if evidence:
+                items.append({"status": "OBSERVED", "claim": claim,
+                              "reason": "Recorded exit 0 for: " + "; ".join(c["command"] + " [log: " + c["log"] + "]" for c in evidence)
+                              + ". This does not prove test count, coverage, or the full claim."})
             else:
-                items.append({"status": "UNVERIFIED", "claim": claim, "reason": "没有记录任何检查命令"})
-                questions.append("补充可复现的测试、构建或 lint 命令。")
+                items.append({"status": "UNVERIFIED", "claim": claim,
+                              "reason": "No fresh successful check of the declared type with intact log evidence."})
+            questions.append(f"Confirm scope and actual output for: {claim}")
         elif says_change:
             if changed:
                 items.append({"status": "OBSERVED", "claim": claim,
@@ -373,7 +398,9 @@ def run(args, root):
         import shlex
         state["checks"].append({"command": shlex.join(command), "exit_code": code,
                                 "time": now(), "before": before, "after": after,
-                                "log": str(log), "timed_out": timed_out})
+                                "log": str(log), "timed_out": timed_out, "kind": args.kind,
+                                "argv": command,
+                                "log_sha256": hashlib.sha256((root / log).read_bytes()).hexdigest()})
         save(store / "task.json", state)
         print(f"{'PASS' if code == 0 else 'FAIL'} (exit {code}). Log: {log}")
         if code != 0:
@@ -450,6 +477,8 @@ def main(argv=None):
     p.add_argument("--summary", help="Text file containing one completion claim per line")
     p.add_argument("--claim", action="append", help="A completion claim; repeat for multiple claims")
     p = sub.add_parser("verify", help="Run a command, capture output and record workspace fingerprints")
+    p.add_argument("--kind", choices=["test", "lint", "build", "other"], default="other",
+                   help="Declared check type, not a correctness certification")
     p.add_argument("--timeout", type=float, default=300)
     p.add_argument("command", nargs=argparse.REMAINDER)
     sub.add_parser("report", help="Write .agentproof/report.md")
