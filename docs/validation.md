@@ -40,3 +40,8 @@ A skipped-only pytest run returned zero while AgentProof returned 1 for incomple
 evidence. XML tampering, archival and a second task were also checked. This is an
 engineering smoke test on a disposable project, not independent user validation or a
 measurement of human review time.
+
+A full-project pytest run exposed a suite total differing from its testcase record
+count when subtests were reported. Both values are now retained as INCONSISTENT
+evidence, never treated as a complete successful test report. The discrepancy is
+displayed for review rather than silently normalized.

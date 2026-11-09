@@ -138,7 +138,7 @@ def junit_evidence(root, check):
     if stored is None:
         return None
     result = dict(stored)
-    if stored["status"] == "VALID":
+    if stored["status"] in {"VALID", "INCONSISTENT"}:
         try:
             path = evidence_path(root, stored["path"])
             if path.stat().st_size != stored["size"] or file_digest(path) != stored["sha256"]:
@@ -311,7 +311,7 @@ def assessment(root, state):
         if tests is not None:
             if tests["status"] != "VALID":
                 attention.append(f"JUnit {tests['status']}: {label}. " + tests.get("error", "Inspect or rerun for current test evidence."))
-            else:
+            if tests["status"] in {"VALID", "INCONSISTENT"}:
                 count = tests["counts"]
                 attention.append(f"JUnit reported for {label}: {count['tests']} tests, {count['passed']} passed, "
                                  f"{count['failures']} failures, {count['errors']} errors, {count['skipped']} skipped.")

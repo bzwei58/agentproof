@@ -62,6 +62,7 @@ def parse_junit(path):
     cases = [element for element in root.iter() if tag(element) == "testcase"]
     result = counts(cases)
     # Validate declared counts at every suite, without double-counting nested suites.
+    mismatches, mismatch_count = [], 0
     for suite in root.iter():
         if tag(suite) not in {"testsuite", "testsuites"}:
             continue
@@ -72,8 +73,13 @@ def parse_junit(path):
                     declared = int(suite.attrib[key])
                 except ValueError as exc:
                     raise ValueError(f"Invalid JUnit {key} count") from exc
+                if declared < 0:
+                    raise ValueError(f"Invalid negative JUnit {key} count")
                 if declared != actual[key]:
-                    raise ValueError(f"JUnit {key} count does not match testcase records")
+                    mismatch_count += 1
+                    if len(mismatches) < 20:
+                        mismatches.append({"suite": suite.get("name", "")[:200], "metric": key,
+                                           "declared": declared, "case_records": actual[key]})
     problems = []
     for case in cases:
         for child in case:
@@ -84,6 +90,12 @@ def parse_junit(path):
                                  "line": case.get("line", "")[:50], "outcome": tag(child),
                                  "message": (child.get("message") or child.text or "")[:1000]})
                 break
-    return {"status": "VALID", "counts": result, "problems": problems,
+    status = "INCONSISTENT" if mismatches else "VALID"
+    parsed = {"status": status, "counts": result, "problems": problems,
             "problems_truncated": result["failures"] + result["errors"] > len(problems),
-            "sha256": hashlib.sha256(raw).hexdigest(), "size": len(raw)}
+            "sha256": hashlib.sha256(raw).hexdigest(), "size": len(raw),
+            "count_mismatches": mismatches, "mismatches_truncated": mismatch_count > len(mismatches)}
+    if mismatches:
+        parsed["error"] = "; ".join(f"Suite {m['suite']}: declared {m['metric']}={m['declared']}, "
+                                    f"testcase records={m['case_records']}" for m in mismatches[:3])
+    return parsed

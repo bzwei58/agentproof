@@ -63,7 +63,6 @@ class JUnitTest(unittest.TestCase):
     def test_invalid_reports_are_rejected(self):
         source = self.root / 'input.xml'
         invalid = ['<bad/>', '<testsuite>',
-                   '<testsuite tests="9"><testcase name="one"/></testsuite>',
                    '<testsuite tests="-1"/>', '<testsuite tests="nan"/>',
                    '<testsuite><testcase><failure/><skipped/></testcase></testsuite>',
                    '<testsuite><testcase status="unknown"/></testsuite>',
@@ -85,6 +84,16 @@ class JUnitTest(unittest.TestCase):
         result = parse_junit(source)
         self.assertEqual(result['counts']['passed'], 0)
         self.assertEqual(result['counts']['skipped'], 1)
+
+    def test_declared_and_record_counts_are_preserved_when_inconsistent(self):
+        self.init()
+        data = self.run_xml('<testsuite name="subtests" tests="9"><testcase name="one"/></testsuite>', expected=1)
+        result = data['checks'][0]['test_results']
+        self.assertEqual(result['status'], 'INCONSISTENT')
+        self.assertEqual(result['counts']['tests'], 1)
+        self.assertEqual(result['count_mismatches'][0]['declared'], 9)
+        self.assertFalse(data['checks'][0]['usable'])
+        self.assertTrue(any('declared tests=9, testcase records=1' in item for item in data['attention']))
 
     def test_namespaced_report_and_failure_detail_limit(self):
         source = self.root / 'input.xml'
