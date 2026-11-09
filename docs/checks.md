@@ -73,3 +73,14 @@ original check records and all submitted claim sets; current reports show only t
 claim set. Archived evidence cannot currently be resumed or restored through the CLI.
 Snapshots and archives duplicate file content; keep capacity in mind. Keep the entire
 `.agentproof/` directory private.
+
+## Incomplete runs (0.4.1+)
+
+The latest configured run includes each planned check, including `NOT_RUN` after an
+interruption or operational error. An execution receipt is persisted before post-command
+capture: a completed command is retained even when files exceed capture limits.
+File matching then becomes `UNKNOWN`; it cannot qualify as current successful evidence.
+Reports remain available and explain why the baseline comparison could not be generated.
+An unfinished receipt with no exit code is `UNKNOWN`, never a passing execution.
+On Windows, timeout handling requests tree termination with taskkill; failures are retained
+as diagnostics. Escaped or detached processes are outside that guarantee.
