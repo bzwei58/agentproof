@@ -19,22 +19,22 @@ $ agentproof report
 ## Install
 
 Requires Python 3.10+, Git, and macOS, Linux, or Windows.
-This project is not published to PyPI yet.
+Available on [PyPI](https://pypi.org/project/agentproof-cli/0.3.0/).
 
-With [pipx installed and on PATH](https://pipx.pypa.io/stable/installation/), install directly from GitHub:
+With [pipx installed and on PATH](https://pipx.pypa.io/stable/installation/), install the versioned release:
 
 ```bash
-pipx install 'git+https://github.com/bzwei58/agentproof.git@main'
+pipx install agentproof-cli==0.3.0
 ```
 
 Then run `agentproof --version` from any project. If the command is missing, run
 `pipx ensurepath` and reopen your terminal. The package is named `agentproof-cli`, while
 the command is `agentproof`; remove it with `pipx uninstall agentproof-cli`.
-This installs the current main branch, not a versioned release.
+To try unreleased development changes, install `git+https://github.com/bzwei58/agentproof.git@main` instead.
 
-If you do not use pipx, create a virtual environment and install the same Git URL with its
+If you do not use pipx, create a virtual environment and install the same package with its
 Python: `python3 -m venv /your/chosen/venv`, then
-`/your/chosen/venv/bin/python -m pip install 'git+https://github.com/bzwei58/agentproof.git@main'`.
+`/your/chosen/venv/bin/python -m pip install agentproof-cli==0.3.0`.
 Use `/your/chosen/venv/bin/agentproof` or activate that environment.
 
 Start with the [five-minute walkthrough](docs/quickstart.md): one failing test, a fix,
