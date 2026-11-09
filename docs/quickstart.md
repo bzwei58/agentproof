@@ -87,7 +87,13 @@ After the agent finishes, run `agentproof verify --kind test -- YOUR_EXISTING_TE
 a report. Choose the project's actual tests/build/lint commands; AgentProof does not discover
 them for you. Read the recorded logs and the code diff before accepting the change.
 
-One task is supported per checkout. See the [pilot guide](pilot.md) for two-task feedback.
+One active task is supported per checkout. See the [pilot guide](pilot.md) for two-task feedback.
 If you see `command not found`, finish pipx's PATH setup and reopen your terminal. If an init
 fails because of the 10 MiB/file or 100 MiB total limit, use a smaller project/worktree;
 Git-tracked files remain in scope even if added to `.gitignore` later.
+
+## Start another task
+
+Run `agentproof finish` to archive the current evidence, then `agentproof init --goal "Next task"`.
+Use `agentproof history` to find saved reports. Archiving does not approve correctness.
+To reuse project checks, see [configured checks](checks.md).

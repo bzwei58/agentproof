@@ -1,16 +1,20 @@
 """Dependency-free local task evidence. Never interprets model claims as proof."""
 import argparse
+import difflib
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 import time
 import uuid
 
 from . import __version__
+from .checks import configured_checks
 
 STORE = ".agentproof"
 MAX_FILE = 10 * 1024 * 1024
@@ -217,21 +221,72 @@ def import_session(path):
     return metrics
 
 
-def report(root, state):
+def latest_check_records(checks):
+    latest = {}
+    for check in checks:
+        key = check.get("name") or (check["command"], check.get("kind", "other"))
+        latest[key] = check
+    return list(latest.values())
+
+
+def assessment(root, state):
     current, omitted = inventory(root)
     baseline = get_snapshot(root, state, state["checkpoints"][0]["id"])["files"]
     changed = [("added" if p not in baseline else "deleted" if p not in current else "modified", p)
                for p in sorted(set(baseline) | set(current)) if baseline.get(p) != current.get(p)]
     current_fp = fingerprint(current, omitted)
+    checks = [{"command": c["command"], "kind": c.get("kind", "other"),
+               "name": c.get("name"), "log": c["log"], "exit_code": c["exit_code"],
+               **check_evidence(root, c, current_fp)} for c in state["checks"]]
+    latest = latest_check_records(checks)
+    attention = []
+    if not checks:
+        attention.append("No verification commands recorded. Run the project's actual checks.")
+    for check in latest:
+        label = check["name"] or check["command"]
+        if check["log_integrity"] != "INTACT":
+            attention.append(f"Log {check['log_integrity']}: {label}. Inspect or rerun this check.")
+        if check["workspace"] == "STALE":
+            attention.append(f"STALE: {label}. Rerun against the current files.")
+        elif check["execution"] != "PASS":
+            attention.append(f"{check['execution']}: {label}. Inspect log: {check['log']}.")
+    review = None
+    if state.get("reviews"):
+        saved = state["reviews"][-1]
+        review = review_claims(root, state, [x["claim"] for x in saved["items"]], saved["source"],
+                               current_inventory=(current, omitted))
+    else:
+        attention.append("No completion claims supplied. Review the goal and relevant diff manually.")
+    return {"schema_version": 1, "goal": state["goal"], "generated": now(),
+            "changes": [{"kind": k, "path": p} for k, p in changed], "checks": checks,
+            "latest_checks": latest,
+            "attention": attention, "review": review, "omitted": omitted,
+            "limitations": "Command receipts and file changes do not certify task completion."}
+
+
+def brief_report(data):
+    lines = ["## Review first", "", f"Changed files: {len(data['changes'])}. "
+             f"Latest successful commands with current files and intact logs: {sum(c['usable'] for c in data['latest_checks'])}.", ""]
+    lines += [f"- {item}" for item in data["attention"]]
+    if data["review"]:
+        lines += [f"- UNVERIFIED: {item['claim']} — {item['reason']}"
+                  for item in data["review"]["items"]]
+    lines += ["", "Next: inspect `agentproof diff`, the relevant logs and acceptance scenarios.",
+              "No automatic accept/reject decision is made."]
+    return "\n".join(lines) + "\n"
+
+
+def report(root, state, data=None):
+    data = data if data is not None else assessment(root, state)
     lines = ["# AgentProof task evidence", "", f"Goal: {state['goal']}", "",
-             f"Generated: {now()}", "", "This report records evidence; it does not certify correctness or task completion.",
-             "", "## Changes since task start", ""]
-    lines += [f"- {kind}: `{name}`" for kind, name in changed] or ["No captured file changes."]
+             f"Generated: {data['generated']}", "", "This report records evidence; it does not certify correctness or task completion.",
+             "", brief_report(data), "", "## Changes since task start", ""]
+    lines += [f"- {c['kind']}: `{c['path']}`" for c in data["changes"]] or ["No captured file changes."]
+    lines += ["", "Compare with the captured task baseline using `agentproof diff`."]
     lines += ["", "## Verification", ""]
     if not state["checks"]:
         lines += ["No verification commands recorded."]
-    for check in state["checks"]:
-        evidence = check_evidence(root, check, current_fp)
+    for check, evidence in zip(state["checks"], data["checks"]):
         fresh = evidence["workspace"] == "CURRENT"
         status = evidence["execution"]
         command = check["command"]
@@ -264,34 +319,33 @@ def report(root, state):
               "- Sensitive filenames are excluded; this is not a secret scanner.",
               "- A passing command proves its exit status, not test coverage or requirements satisfaction.",
               "- Work concurrently edited while checking may invalidate evidence; stop edits before verification."]
-    lines += [f"- Omitted `{x['path']}`: {x['reason']}" for x in omitted]
+    lines += [f"- Omitted `{x['path']}`: {x['reason']}" for x in data["omitted"]]
     lines += ["", "## Checkpoints", ""]
     lines += [f"- `{s['id']}` — {s['label']} ({s['time']})" for s in state["checkpoints"]]
-    if state.get("reviews"):
+    if data["review"]:
         lines += ["", "## Claim review", ""]
-        for review in state["reviews"]:
-            lines += [f"Reviewed: `{review['source']}` ({review['time']})", ""]
-            latest = review_claims(root, state, [x["claim"] for x in review["items"]], review["source"])
-            for item in latest["items"]:
-                lines.append(f"- **{item['status']}** {item['claim']} — {item['reason']}")
-                lines += [f"  - Receipt: {receipt}" for receipt in item.get("receipts", [])]
-            if latest.get("questions"):
-                lines += ["", "### Human confirmation", ""]
-                lines += [f"- {question}" for question in latest["questions"]]
+        latest = data["review"]
+        lines += [f"Latest claim set: `{latest['source']}`; recomputed at {latest['time']}.", ""]
+        for item in latest["items"]:
+            lines.append(f"- **{item['status']}** {item['claim']} — {item['reason']}")
+            lines += [f"  - Receipt: {receipt}" for receipt in item.get("receipts", [])]
+        if latest.get("questions"):
+            lines += ["", "### Human confirmation", ""]
+            lines += [f"- {question}" for question in latest["questions"]]
     return "\n".join(lines) + "\n"
 
 
-def review_claims(root, state, claims, source):
+def review_claims(root, state, claims, source, current_inventory=None):
     """Match plain-language completion claims to observed local evidence.
 
     This deliberately uses transparent rules instead of another model. A claim is
     never upgraded to VERIFIED just because it sounds confident.
     """
-    current, omitted = inventory(root)
+    current, omitted = current_inventory if current_inventory is not None else inventory(root)
     current_fp = fingerprint(current, omitted)
     baseline = get_snapshot(root, state, state["checkpoints"][0]["id"])["files"]
     changed = [p for p in sorted(set(baseline) | set(current)) if baseline.get(p) != current.get(p)]
-    checks = state.get("checks", [])
+    checks = latest_check_records(state.get("checks", []))
     fresh_pass = [c for c in checks if check_evidence(root, c, current_fp)["usable"]]
     items, questions = [], []
     for raw in claims:
@@ -346,18 +400,124 @@ def log_tail(path):
     return ("[earlier output omitted]\n" if truncated else "") + (tail or "(no command output)")
 
 
+def workspace_diff(root, state, selected=None):
+    snap = get_snapshot(root, state, state["checkpoints"][0]["id"])
+    current, _ = inventory(root)
+    names = sorted(set(snap["files"]) | set(current))
+    if selected is not None:
+        safe_path(root, selected)
+        if selected not in names:
+            raise ValueError(f"Path is outside the captured baseline and current files: {selected}")
+        names = [selected]
+    lines = []
+    for name in names:
+        old, new = snap["files"].get(name), current.get(name)
+        if old == new:
+            continue
+        before, after = b"", b""
+        if old is not None:
+            source = safe_path(root / STORE / "snapshots" / snap["id"] / "files", name)
+            before = source.read_bytes()
+            if hashlib.sha256(before).hexdigest() != old["sha256"]:
+                raise ValueError(f"Corrupted baseline file: {name}")
+        if new is not None:
+            after = safe_path(root, name).read_bytes()
+            if hashlib.sha256(after).hexdigest() != new["sha256"]:
+                raise ValueError("Workspace changed during diff; retry when edits stop")
+        lines.append(f"diff --agentproof a/{name} b/{name}\n")
+        if old is not None and new is not None and old["mode"] != new["mode"]:
+            lines.append(f"old mode {old['mode']:03o}\nnew mode {new['mode']:03o}\n")
+        try:
+            if b"\0" in before or b"\0" in after:
+                raise UnicodeError()
+            old_lines, new_lines = (x.decode("utf-8").splitlines(keepends=True) for x in (before, after))
+        except UnicodeError:
+            lines.append("Binary or non-UTF-8 file changed; inspect with an appropriate viewer.\n")
+            continue
+        for line in difflib.unified_diff(old_lines, new_lines,
+                                         fromfile=f"a/{name}" if old is not None else "/dev/null",
+                                         tofile=f"b/{name}" if new is not None else "/dev/null"):
+            lines.append(line if line.endswith("\n") else line + "\n\\ No newline at end of file\n")
+    return "".join(lines) or "No captured file changes.\n"
+
+
+def write_report(root, state):
+    store = root / STORE
+    # A human-readable comparison, not a Git-apply or rollback artifact.
+    (store / "changes.patch").write_text(workspace_diff(root, state), encoding="utf-8")
+    content = report(root, state)
+    content = content.replace("Compare with the captured task baseline using `agentproof diff`.",
+                              "[View captured baseline diff](changes.patch), or run `agentproof diff`.")
+    (store / "report.md").write_text(content, encoding="utf-8")
+    return store / "report.md"
+
+
+def finish_task(root, state):
+    store = root / STORE
+    write_report(root, state)
+    ident = uuid.uuid4().hex[:12]
+    history = store / "history"
+    if history.is_symlink():
+        raise ValueError("Task history directory must not be a symlink")
+    history.mkdir(exist_ok=True)
+    pending, destination = history / ("." + ident + ".pending"), history / ident
+    pending.mkdir()
+    try:
+        for name in ("snapshots", "checks"):
+            source = store / name
+            if source.is_symlink():
+                raise ValueError(f"Cannot archive symlink evidence directory: {name}")
+            if source.exists():
+                shutil.copytree(source, pending / name, symlinks=True)
+        for name in ("report.md", "changes.patch"):
+            shutil.copyfile(store / name, pending / name)
+        archived_report = pending / "report.md"
+        archived_report.write_text(archived_report.read_text(encoding="utf-8")
+                                  .replace(".agentproof/checks/", "checks/")
+                                  .replace(".agentproof\\checks\\", "checks/"), encoding="utf-8")
+        save(pending / "task.json", {**state, "id": ident, "finished": now()})
+        pending.replace(destination)
+    except BaseException:
+        shutil.rmtree(pending, ignore_errors=True)
+        raise
+    # Do not remove active evidence until a complete archive is in place.
+    (store / "task.json").unlink()
+    for name in ("snapshots", "checks"):
+        if (store / name).exists():
+            shutil.rmtree(store / name)
+    for name in ("report.md", "changes.patch"):
+        (store / name).unlink(missing_ok=True)
+    return destination
+
+
 def run(args, root):
     store = root / STORE
+    if args.action == "history":
+        entries = [(path, load(path)) for path in (store / "history").glob("*/task.json")
+                   if not path.parent.name.startswith(".")]
+        for path, task in sorted(entries, key=lambda item: item[1]["finished"], reverse=True):
+            print(f"{task['id']} | {task['finished']} | {task['goal']}")
+            print(f"  Report: {path.parent / 'report.md'}")
+        if not entries:
+            print("No archived tasks.")
+        return 0
+    if args.action == "check":
+        checks = configured_checks(root)
+        if args.list:
+            print(json.dumps(checks, ensure_ascii=False, indent=2))
+            return 0
     if args.action == "init":
         if (store / "task.json").exists():
-            raise ValueError("Task already exists; use a separate repository/worktree for another task")
+            raise ValueError("Task already exists; use finish to archive it, or another worktree for a concurrent task")
         # Keep local evidence out of commits without editing the shared .gitignore.
         exclude_path = Path(os.fsdecode(git(root, "rev-parse", "--git-path", "info/exclude")).strip())
         if not exclude_path.is_absolute():
             exclude_path = root / exclude_path
         exclude_path.parent.mkdir(parents=True, exist_ok=True)
-        with exclude_path.open("a", encoding="utf-8") as f:
-            f.write("\n/.agentproof/\n")
+        exclusions = exclude_path.read_text(encoding="utf-8", errors="replace").splitlines() if exclude_path.exists() else []
+        if "/.agentproof/" not in exclusions:
+            with exclude_path.open("a", encoding="utf-8") as f:
+                f.write("\n/.agentproof/\n")
         state = {"version": 1, "goal": args.goal, "created": now(),
                  "checkpoints": [], "checks": [], "sessions": []}
         snap = checkpoint(root, state, "task start")
@@ -366,7 +526,30 @@ def run(args, root):
     if not (store / "task.json").exists():
         raise ValueError("Run agentproof init --goal '...' first")
     state = load(store / "task.json")
-    if args.action == "checkpoint":
+    if args.action == "check":
+        failed = False
+        for check in checks:
+            print(f"Check: {check['name']} (declared kind: {check['kind']})")
+            code = run(argparse.Namespace(action="verify", command=check["command"],
+                       timeout=check["timeout"], kind=check["kind"], check_name=check["name"]), root)
+            failed = failed or code != 0
+            if code == 2:
+                return 2
+            if load(store / "task.json")["checks"][-1]["exit_code"] == 130:
+                print("Checks interrupted; remaining commands were not run.")
+                break
+        state = load(store / "task.json")
+        print(brief_report(assessment(root, state)))
+        print(f"Report: {write_report(root, state)}")
+        return 1 if failed else 0
+    elif args.action == "finish":
+        destination = finish_task(root, state)
+        print(f"Task archived: {destination.name}")
+        print(f"Report: {destination / 'report.md'}")
+        print("Archiving is not approval of correctness. Run init to start the next task.")
+    elif args.action == "diff":
+        print(workspace_diff(root, state, args.path), end="")
+    elif args.action == "checkpoint":
         snap = checkpoint(root, state, args.label)
         print(f"Checkpoint: {snap['id']} ({len(snap['files'])} files)")
     elif args.action == "import-session":
@@ -395,6 +578,8 @@ def run(args, root):
             for question in review["questions"]:
                 print(f"- {question}")
     elif args.action == "verify":
+        if not math.isfinite(args.timeout) or args.timeout <= 0:
+            raise ValueError("Timeout must be positive and finite")
         command = args.command
         if command and command[0] == "--":
             command = command[1:]
@@ -426,6 +611,7 @@ def run(args, root):
         after = fingerprint(*inventory(root))
         import shlex
         state["checks"].append({"command": shlex.join(command), "exit_code": code,
+                                "name": getattr(args, "check_name", None),
                                 "time": now(), "before": before, "after": after,
                                 "log": str(log), "timed_out": timed_out, "kind": args.kind,
                                 "argv": command,
@@ -439,13 +625,14 @@ def run(args, root):
             print(log_tail(root / log))
         return 0 if code == 0 else 1
     elif args.action in ("report", "status"):
-        result = report(root, state)
         if args.action == "report":
-            path = store / "report.md"
-            path.write_text(result, encoding="utf-8")
-            print(path)
+            print(write_report(root, state))
         else:
-            print(result)
+            data = assessment(root, state)
+            if args.json:
+                print(json.dumps(data, ensure_ascii=False, indent=2))
+            else:
+                print(brief_report(data) if args.brief else report(root, state, data))
     elif args.action == "restore":
         snap = get_snapshot(root, state, args.id)
         pending = []
@@ -511,7 +698,16 @@ def main(argv=None):
     p.add_argument("--timeout", type=float, default=300)
     p.add_argument("command", nargs=argparse.REMAINDER)
     sub.add_parser("report", help="Write .agentproof/report.md")
-    sub.add_parser("status", help="Print current evidence report")
+    p = sub.add_parser("status", help="Print current evidence report")
+    output = p.add_mutually_exclusive_group()
+    output.add_argument("--brief", action="store_true", help="Print review priorities first")
+    output.add_argument("--json", action="store_true", help="Print a versioned machine-readable assessment")
+    p = sub.add_parser("check", help="Run explicit project checks and generate a review report")
+    p.add_argument("--list", action="store_true", help="Inspect configured commands without running them")
+    p = sub.add_parser("diff", help="Compare current captured files with the task baseline")
+    p.add_argument("path", nargs="?", help="Optional repository-relative captured path")
+    sub.add_parser("finish", help="Archive task evidence without approving correctness")
+    sub.add_parser("history", help="List archived tasks and their reports")
     p = sub.add_parser("restore", help="Preview file restoration; new files are retained")
     p.add_argument("id")
     p.add_argument("--apply", action="store_true")
