@@ -82,7 +82,13 @@ printf 'Report: %s/.agentproof/report.md\n' "$PWD"
 修改后，用 `agentproof verify --kind test -- 项目已有的测试命令` 记录检查，再生成报告。
 应使用项目实际的测试、构建或 lint 命令，工具不会自动发现检查命令。接受修改前仍需读日志和 diff。
 
-每个 checkout 暂支持一个任务。[试用指南](pilot.md) 提供了两个真实任务的反馈方式。
+每个 checkout 支持一个活动任务。[试用指南](pilot.md) 提供了两个真实任务的反馈方式。
 如果提示找不到命令，请完成 pipx 的 PATH 配置并重开终端。如果初始化超过单文件 10 MiB 或
 总内容 100 MiB 上限，先选一个较小项目或 worktree；已被 Git 跟踪的文件不会因为后来加入
 `.gitignore` 就被排除。
+
+## 开始下一个任务
+
+执行 `agentproof finish` 归档当前证据，再用 `agentproof init --goal "下一个任务"` 开始。
+`agentproof history` 可查看旧报告位置。归档不代表确认正确性；并行任务仍需独立 worktree。
+反复使用的检查命令可保存为[项目配置](checks.md)。

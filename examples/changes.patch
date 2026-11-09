@@ -1,0 +1,17 @@
+diff --agentproof a/payment.py b/payment.py
+--- a/payment.py
++++ b/payment.py
+@@ -1,2 +1,2 @@
+ def should_retry(attempt, limit):
+-    return True
++    return attempt < limit
+diff --agentproof a/test_payment.py b/test_payment.py
+--- /dev/null
++++ b/test_payment.py
+@@ -0,0 +1,6 @@
++import unittest
++from payment import should_retry
++class RetryTest(unittest.TestCase):
++    def test_limit(self):
++        self.assertTrue(should_retry(1, 3))
++        self.assertFalse(should_retry(3, 3))

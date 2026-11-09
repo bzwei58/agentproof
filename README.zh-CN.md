@@ -9,12 +9,12 @@ AgentProof 先解决这些具体问题，不需要模型、API Key 或云服务�
 
 ## 安装
 
-需要 Python 3.10+、Git、macOS、Linux 或 Windows。已发布到 [PyPI](https://pypi.org/project/agentproof-cli/0.3.0/)。
+需要 Python 3.10+、Git、macOS、Linux 或 Windows。已发布到 [PyPI](https://pypi.org/project/agentproof-cli/)。
 
 已[安装 pipx 并配置 PATH](https://pipx.pypa.io/stable/installation/) 时，一条命令即可安装正式版本：
 
 ```bash
-pipx install agentproof-cli==0.3.0
+pipx install agentproof-cli
 ```
 
 之后在任意项目执行 `agentproof --version`。如果提示找不到命令，执行 `pipx ensurepath` 并重开终端。
@@ -22,7 +22,7 @@ pipx install agentproof-cli==0.3.0
 如需体验未发布的开发代码，可改装 `git+https://github.com/bzwei58/agentproof.git@main`。
 
 不用 pipx 也可以：先用 `python3 -m venv /你选择的路径/venv` 创建虚拟环境，再执行
-`/你选择的路径/venv/bin/python -m pip install agentproof-cli==0.3.0`。
+`/你选择的路径/venv/bin/python -m pip install agentproof-cli`。
 使用该目录下 `bin/agentproof` 的绝对路径调用，或激活虚拟环境。
 
 建议先完成[五分钟教程](docs/quickstart.zh-CN.md)：在独立临时目录里体验失败、修复、旧检查失效和报告。
@@ -57,10 +57,33 @@ agentproof restore CHECKPOINT_ID
 agentproof restore CHECKPOINT_ID --apply
 ```
 
-命令在 Git 仓库根目录执行，每个 checkout 暂支持一个任务。另一个任务请用独立 worktree。
+命令在 Git 仓库根目录执行，每个 checkout 支持一个活动任务；结束归档后可开始下一个任务，并行任务请用独立 worktree。
 `verify` 不解释 shell 管道，复杂命令需显式 `sh -c '...'`；仅执行你信任的命令。
 检查失败返回 1，操作或参数错误返回 2。完整输出保存在 `.agentproof/checks/`。
 失败时终端直接显示最后 12 行、最多 4,000 字符的输出片段；超时会明确提示，成功时保持简洁。
+
+## 更少操作的日常流程（0.4.0+）
+
+在项目根目录配置 [`agentproof.json`](docs/checks.md)，保存已有测试、lint、构建命令：
+
+```bash
+agentproof check --list   # 先查看完整配置，不执行命令
+agentproof check          # 顺序执行配置中的检查，生成摘要和完整报告
+agentproof status --brief # 先看失败、过期、日志异常和待核实声明
+agentproof diff           # 与任务起点的真实文件内容比较
+agentproof status --json  # schema_version 为 1 的结构化结果
+agentproof finish         # 归档证据；不代表确认任务正确
+agentproof history        # 查看归档任务与报告位置
+agentproof init --goal "下一个任务"
+```
+
+`check` 遇到检查失败仍生成报告，返回 1；配置有误时在执行任何配置命令前返回 2。
+配置中的命令直接执行，不自动发现命令或解释 shell 管道。已有安装可用 `pipx upgrade agentproof-cli` 更新。
+
+完整报告把审查摘要放在开头，并链接本地 `changes.patch`；也可用 `diff 文件路径` 查看单个文件。
+比较起点包含任务开始时的未提交改动，二进制文件只提示变化；该文件用于人工阅读，不用于 `git apply`。
+报告仅展示最近一次提交的声明集合，旧集合仍保存在任务元数据中。
+归档保留快照、日志、静态报告和差异，不改项目文件及 Git 暂存区。归档不会认证正确性，也不会自动重新运行检查。
 
 ## 第一版实际做到的事
 

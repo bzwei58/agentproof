@@ -2,6 +2,16 @@
 
 All notable changes to AgentProof are documented here.
 
+## 0.4.0 — 2026-11-09
+
+- Put actionable review priorities first, with separate execution, freshness and log integrity states.
+- Add `status --brief` and versioned `status --json` for summaries and integrations.
+- Add captured-baseline `diff` and a local comparison artifact linked from reports.
+- Add explicit reusable `agentproof.json` checks, preview with `check --list`, and run with `check`.
+- Add `finish` and `history` so evidence is archived before starting another task in the same checkout.
+- Display only the latest claim set in current reports while retaining prior sets in task metadata.
+- Validate positive finite timeouts before executing checks.
+
 ## 0.3.1 — 2026-11-09
 
 - Keep completion claims UNVERIFIED; show command receipts separately from claim status.

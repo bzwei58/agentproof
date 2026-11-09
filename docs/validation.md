@@ -19,3 +19,11 @@ For the next pilot, use two comparable real tasks and record:
 Use the existing pilot issue template with anonymized results. Never publish private
 transcripts, source, logs or `.agentproof/` contents. Native Cline/Cursor session support
 still needs documented format samples and dedicated compatibility tests.
+
+## 0.4.0 workflow checks
+
+Disposable-repository tests cover config preview, full validation before execution,
+failure receipts, latest-check precedence, baseline diffs, missing logs, sequential task
+archival and copy failure preserving active evidence. These checks exercise implementation
+behavior; they do not establish user time savings. A structured-result adapter, semantic
+acceptance mapping and native client integrations remain future work.
