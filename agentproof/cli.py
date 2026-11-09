@@ -103,6 +103,37 @@ def fingerprint(files, omitted):
     return hashlib.sha256(json.dumps([files, omitted], sort_keys=True).encode()).hexdigest()
 
 
+def file_digest(path):
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(65536), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def check_evidence(root, check, current_fp):
+    """Keep historical execution, current file scope, and log integrity separate."""
+    fresh = check["before"] == check["after"] == current_fp
+    integrity = "UNRECORDED"
+    if check.get("log_sha256"):
+        try:
+            relative = Path(check["log"])
+            if not relative.parts or relative.parts[0] != STORE:
+                raise ValueError("Log is outside evidence directory")
+            log = safe_path(root / STORE, str(Path(*relative.parts[1:])))
+            integrity = "INTACT" if file_digest(log) == check["log_sha256"] else "MODIFIED"
+        except FileNotFoundError:
+            integrity = "MISSING"
+        except (OSError, ValueError):
+            integrity = "UNREADABLE"
+    execution = "PASS" if check["exit_code"] == 0 else "FAIL"
+    if check.get("timed_out"):
+        execution = "TIMEOUT"
+    return {"execution": execution, "workspace": "CURRENT" if fresh else "STALE",
+            "log_integrity": integrity,
+            "usable": execution == "PASS" and fresh and integrity == "INTACT"}
+
+
 def checkpoint(root, state, label):
     files, omitted = inventory(root)
     ident = uuid.uuid4().hex[:12]
@@ -200,16 +231,19 @@ def report(root, state):
     if not state["checks"]:
         lines += ["No verification commands recorded."]
     for check in state["checks"]:
-        fresh = check["before"] == check["after"] == current_fp
-        status = "PASS" if check["exit_code"] == 0 else "FAIL"
+        evidence = check_evidence(root, check, current_fp)
+        fresh = evidence["workspace"] == "CURRENT"
+        status = evidence["execution"]
         command = check["command"]
         preview = " ".join(command.split())
         expanded = "\n" in command or len(preview) > 120
         if len(preview) > 120:
             preview = preview[:117] + "..."
         ticks = "`" * (max((len(x) for x in re.findall(r"`+", preview)), default=0) + 1)
-        lines += [f"- **{status}** {ticks} {preview} {ticks} — exit {check['exit_code']}; "
+        lines += [f"- **{status}** {ticks} {preview} {ticks} — recorded exit {check['exit_code']}; "
                   f"{'matches current captured files' if fresh else 'STALE / files changed'}; "
+                  f"declared kind: {check.get('kind', 'other')}; "
+                  f"log integrity: **{evidence['log_integrity']}**; "
                   f"log: `{check['log']}`"]
         if check.get("timed_out"):
             lines += ["  Timed out; the process group was terminated."]
@@ -240,6 +274,7 @@ def report(root, state):
             latest = review_claims(root, state, [x["claim"] for x in review["items"]], review["source"])
             for item in latest["items"]:
                 lines.append(f"- **{item['status']}** {item['claim']} — {item['reason']}")
+                lines += [f"  - Receipt: {receipt}" for receipt in item.get("receipts", [])]
             if latest.get("questions"):
                 lines += ["", "### Human confirmation", ""]
                 lines += [f"- {question}" for question in latest["questions"]]
@@ -257,7 +292,7 @@ def review_claims(root, state, claims, source):
     baseline = get_snapshot(root, state, state["checkpoints"][0]["id"])["files"]
     changed = [p for p in sorted(set(baseline) | set(current)) if baseline.get(p) != current.get(p)]
     checks = state.get("checks", [])
-    fresh_pass = [c for c in checks if c["exit_code"] == 0 and c["before"] == c["after"] == current_fp]
+    fresh_pass = [c for c in checks if check_evidence(root, c, current_fp)["usable"]]
     items, questions = [], []
     for raw in claims:
         claim = " ".join(raw.strip().split())
@@ -277,27 +312,19 @@ def review_claims(root, state, claims, source):
             questions.append(f"Confirm the stated limitation: {claim}")
         elif kind and says_pass:
             matching = [c for c in fresh_pass if c.get("kind") == kind]
-            evidence = []
-            for c in matching:
-                log = root / c["log"]
-                if (c.get("log_sha256") and log.is_file() and
-                        hashlib.sha256(log.read_bytes()).hexdigest() == c["log_sha256"]):
-                    evidence.append(c)
-            if evidence:
-                items.append({"status": "OBSERVED", "claim": claim,
-                              "reason": "Recorded exit 0 for: " + "; ".join(c["command"] + " [log: " + c["log"] + "]" for c in evidence)
-                              + ". This does not prove test count, coverage, or the full claim."})
-            else:
-                items.append({"status": "UNVERIFIED", "claim": claim,
-                              "reason": "No fresh successful check of the declared type with intact log evidence."})
+            receipts = ["Recorded exit 0 for: " + c["command"] + " [log: " + c["log"]
+                        + "; declared kind: " + kind + "]" for c in matching]
+            items.append({"status": "UNVERIFIED", "claim": claim, "receipts": receipts,
+                          "reason": ("Matching command receipts exist, but the check category is user-declared. "
+                                     "Test execution, count, coverage and the full claim are not established."
+                                     if receipts else
+                                     "No fresh successful check of the declared type with intact log evidence.")})
             questions.append(f"Confirm scope and actual output for: {claim}")
         elif says_change:
-            if changed:
-                items.append({"status": "OBSERVED", "claim": claim,
-                              "reason": f"检测到 {len(changed)} 个文件相对任务起点发生变化"})
-            else:
-                items.append({"status": "CONFLICT", "claim": claim, "reason": "当前工作区没有相对任务起点的文件变化"})
-                questions.append("确认修改是否写入了另一个目录、分支或工作树。")
+            items.append({"status": "UNVERIFIED", "claim": claim,
+                          "reason": (f"Observed {len(changed)} changed captured files; file changes do not establish this fix or implementation."
+                                     if changed else "No captured file changes; this does not rule out changes outside the captured scope.")})
+            questions.append(f"Inspect the relevant diff and a reproducible acceptance check for: {claim}")
         else:
             items.append({"status": "UNVERIFIED", "claim": claim, "reason": "没有可匹配的本地证据规则"})
             questions.append("为这条声明指定可复现的文件、命令或外部结果证据。")
@@ -361,6 +388,8 @@ def run(args, root):
         save(store / "task.json", state)
         for item in review["items"]:
             print(f"{item['status']}: {item['claim']} — {item['reason']}")
+            for receipt in item.get("receipts", []):
+                print(f"  Receipt: {receipt}")
         if review["questions"]:
             print("\nHuman confirmation:")
             for question in review["questions"]:
@@ -400,7 +429,7 @@ def run(args, root):
                                 "time": now(), "before": before, "after": after,
                                 "log": str(log), "timed_out": timed_out, "kind": args.kind,
                                 "argv": command,
-                                "log_sha256": hashlib.sha256((root / log).read_bytes()).hexdigest()})
+                                "log_sha256": file_digest(root / log)})
         save(store / "task.json", state)
         print(f"{'PASS' if code == 0 else 'FAIL'} (exit {code}). Log: {log}")
         if code != 0:
