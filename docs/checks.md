@@ -22,6 +22,8 @@ Each entry requires a unique nonempty `name`, a `kind` (`test`, `lint`, `build`,
 and must be positive and finite. Unknown fields and invalid entries are rejected before
 any command runs. Executable paths depend on your environment; on Windows an npm
 command may require `npm.cmd` rather than `npm`.
+Optional `result_format: "junit"` enables [reported test counts and failures](junit.md)
+and requires a `{junit}` placeholder in the command (0.5.0+).
 
 The kind is a user declaration. A zero exit status does not establish that tests ran,
 how many ran, their coverage, or that the task is correct. Review the actual output.

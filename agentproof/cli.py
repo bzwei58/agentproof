@@ -15,6 +15,7 @@ import uuid
 
 from . import __version__
 from .checks import configured_checks
+from .junit import parse_junit
 
 STORE = ".agentproof"
 MAX_FILE = 10 * 1024 * 1024
@@ -125,6 +126,37 @@ def file_digest(path):
     return digest.hexdigest()
 
 
+def evidence_path(root, name):
+    relative = Path(name)
+    if not relative.parts or relative.parts[0] != STORE:
+        raise ValueError("File is outside evidence directory")
+    return safe_path(root / STORE, str(Path(*relative.parts[1:])))
+
+
+def junit_evidence(root, check):
+    stored = check.get("test_results")
+    if stored is None:
+        return None
+    result = dict(stored)
+    if stored["status"] == "VALID":
+        try:
+            path = evidence_path(root, stored["path"])
+            if path.stat().st_size != stored["size"] or file_digest(path) != stored["sha256"]:
+                result["status"] = "MODIFIED"
+        except FileNotFoundError:
+            result["status"] = "MISSING"
+        except (OSError, ValueError):
+            result["status"] = "UNREADABLE"
+    return result
+
+
+def usable_test_results(result):
+    if result is None:
+        return True  # No structured test evidence was requested.
+    return (result["status"] == "VALID" and result["counts"]["tests"] > result["counts"]["skipped"]
+            and result["counts"]["failures"] == result["counts"]["errors"] == 0)
+
+
 def check_evidence(root, check, current_fp):
     """Keep historical execution, current file scope, and log integrity separate."""
     known = current_fp is not None and check.get("before") is not None and check.get("after") is not None
@@ -132,10 +164,7 @@ def check_evidence(root, check, current_fp):
     integrity = "UNRECORDED"
     if check.get("log_sha256"):
         try:
-            relative = Path(check["log"])
-            if not relative.parts or relative.parts[0] != STORE:
-                raise ValueError("Log is outside evidence directory")
-            log = safe_path(root / STORE, str(Path(*relative.parts[1:])))
+            log = evidence_path(root, check["log"])
             integrity = "INTACT" if file_digest(log) == check["log_sha256"] else "MODIFIED"
         except FileNotFoundError:
             integrity = "MISSING"
@@ -146,11 +175,14 @@ def check_evidence(root, check, current_fp):
         execution = "TIMEOUT"
     if check.get("interrupted") or check.get("exit_code") == 130:
         execution = "INTERRUPTED"
+    tests = junit_evidence(root, check)
     return {"execution": execution, "workspace": "UNKNOWN" if not known else "CURRENT" if fresh else "STALE",
             "log_integrity": integrity,
             "capture_error": check.get("capture_error"),
             "termination_error": check.get("termination_error"),
-            "usable": execution == "PASS" and fresh and integrity == "INTACT" and not check.get("capture_error")}
+            "test_results": tests,
+            "usable": (execution == "PASS" and fresh and integrity == "INTACT"
+                       and not check.get("capture_error") and usable_test_results(tests))}
 
 
 def checkpoint(root, state, label):
@@ -239,7 +271,7 @@ def import_session(path):
 def latest_check_records(checks):
     latest = {}
     for check in checks:
-        key = check.get("name") or (check["command"], check.get("kind", "other"))
+        key = check.get("name") or (check.get("command_template", check["command"]), check.get("kind", "other"))
         latest[key] = check
     return list(latest.values())
 
@@ -256,6 +288,7 @@ def assessment(root, state):
                if current is not None else [])
     current_fp = fingerprint(current, omitted) if current is not None else None
     checks = [{"command": c["command"], "kind": c.get("kind", "other"),
+               "command_template": c.get("command_template", c["command"]),
                "name": c.get("name"), "log": c["log"], "exit_code": c["exit_code"],
                **check_evidence(root, c, current_fp)} for c in state["checks"]]
     latest = latest_check_records(checks)
@@ -274,6 +307,22 @@ def assessment(root, state):
             attention.append(f"File matching UNKNOWN: {label}. {check['capture_error'] or 'Capture is incomplete.'}")
         elif check["execution"] != "PASS":
             attention.append(f"{check['execution']}: {label}. Inspect log: {check['log']}.")
+        tests = check["test_results"]
+        if tests is not None:
+            if tests["status"] != "VALID":
+                attention.append(f"JUnit {tests['status']}: {label}. " + tests.get("error", "Inspect or rerun for current test evidence."))
+            else:
+                count = tests["counts"]
+                attention.append(f"JUnit reported for {label}: {count['tests']} tests, {count['passed']} passed, "
+                                 f"{count['failures']} failures, {count['errors']} errors, {count['skipped']} skipped.")
+                if count["tests"] == 0 or count["tests"] == count["skipped"]:
+                    attention.append(f"No executed test cases reported for {label}. Check discovery and skip conditions.")
+                for problem in tests["problems"][:3]:
+                    location = problem["file"] or problem["class"]
+                    message = " ".join(problem["message"].split())[:180]
+                    attention.append(f"Inspect {problem['outcome']}: {location}::{problem['name']} — {message}")
+                if len(tests["problems"]) > 3 or tests.get("problems_truncated"):
+                    attention.append(f"More failure details for {label}; inspect the full report or source JUnit XML.")
     plan = state.get("check_runs", [{}])[-1].get("planned", [])
     for step in plan:
         if step["status"] in {"NOT_RUN", "RUNNING", "ERROR"}:
@@ -307,8 +356,15 @@ def brief_report(data):
     return "\n".join(lines) + "\n"
 
 
-def report(root, state, data=None):
+def report(root, state, data=None, archived=False):
     data = data if data is not None else assessment(root, state)
+    def source_label(name):
+        if archived:
+            try:
+                return Path(name).relative_to(STORE).as_posix()
+            except ValueError:
+                pass
+        return name
     lines = ["# AgentProof task evidence", "", f"Goal: {state['goal']}", "",
              f"Generated: {data['generated']}", "", "This report records evidence; it does not certify correctness or task completion.",
              "", brief_report(data), "", "## Changes since task start", ""]
@@ -332,13 +388,26 @@ def report(root, state, data=None):
                   f"{freshness}; "
                   f"declared kind: {check.get('kind', 'other')}; "
                   f"log integrity: **{evidence['log_integrity']}**; "
-                  f"log: `{check['log']}`"]
+                  f"log: `{source_label(check['log'])}`"]
         if check.get("timed_out"):
             lines += ["  Timed out; process-tree termination was requested."]
         if check.get("capture_error"):
             lines += [f"  Capture error: {check['capture_error']}"]
         if check.get("termination_error"):
             lines += [f"  Termination error: {check['termination_error']}"]
+        if evidence["test_results"] is not None:
+            tests = evidence["test_results"]
+            lines += [f"  JUnit: **{tests['status']}**; source: `{source_label(tests['path'])}`."]
+            if tests.get("counts"):
+                lines += ["  Recorded report counts: " + "; ".join(f"{k}: {v}" for k, v in tests["counts"].items()) + "."]
+                for problem in tests["problems"]:
+                    location = problem["file"] or problem["class"]
+                    if problem["line"]:
+                        location += ":" + problem["line"]
+                    message = " ".join(problem["message"].split())[:300]
+                    lines += [f"  - Reported {problem['outcome']}: `{location}::{problem['name']}` — {message}"]
+                if tests.get("problems_truncated"):
+                    lines += ["  Additional problem records omitted; inspect source XML."]
         if expanded:
             fence = "`" * max(3, max((len(x) for x in re.findall(r"`+", command)), default=0) + 1)
             lines += ["", "<details>", "<summary>Full command</summary>", "",
@@ -410,8 +479,18 @@ def review_claims(root, state, claims, source, current_inventory=None):
             matching = [c for c in fresh_pass if c.get("kind") == kind]
             receipts = ["Recorded exit 0 for: " + c["command"] + " [log: " + c["log"]
                         + "; declared kind: " + kind + "]" for c in matching]
+            structured = False
+            for check in matching:
+                tests = junit_evidence(root, check)
+                if tests is not None and tests["status"] == "VALID":
+                    structured = True
+                    receipts.append("JUnit reported: " + "; ".join(f"{k}: {v}" for k, v in tests["counts"].items())
+                                    + " [source: " + tests["path"] + "]")
             items.append({"status": "UNVERIFIED", "claim": claim, "receipts": receipts,
-                          "reason": ("Matching command receipts exist, but the check category is user-declared. "
+                          "reason": ("Current JUnit report counts and outcomes are linked below. "
+                                     "These are reporter-provided; coverage and requirements remain unverified."
+                                     if structured else
+                                     "Matching command receipts exist, but the check category is user-declared. "
                                      "Test execution, count, coverage and the full claim are not established."
                                      if receipts else
                                      "No fresh successful check of the declared type with intact log evidence.")})
@@ -510,7 +589,7 @@ def finish_task(root, state):
     pending, destination = history / ("." + ident + ".pending"), history / ident
     pending.mkdir()
     try:
-        for name in ("snapshots", "checks"):
+        for name in ("snapshots", "checks", "results"):
             source = store / name
             if source.is_symlink():
                 raise ValueError(f"Cannot archive symlink evidence directory: {name}")
@@ -519,9 +598,10 @@ def finish_task(root, state):
         for name in ("report.md", "changes.patch"):
             shutil.copyfile(store / name, pending / name)
         archived_report = pending / "report.md"
-        archived_report.write_text(archived_report.read_text(encoding="utf-8")
-                                  .replace(".agentproof/checks/", "checks/")
-                                  .replace(".agentproof\\checks\\", "checks/"), encoding="utf-8")
+        content = report(root, state, archived=True).replace(
+            "Compare with the captured task baseline using `agentproof diff`.",
+            "[View captured baseline diff](changes.patch). Archived comparison is static.")
+        archived_report.write_text(content, encoding="utf-8")
         save(pending / "task.json", {**state, "id": ident, "finished": now()})
         pending.replace(destination)
     except BaseException:
@@ -529,7 +609,7 @@ def finish_task(root, state):
         raise
     # Do not remove active evidence until a complete archive is in place.
     (store / "task.json").unlink()
-    for name in ("snapshots", "checks"):
+    for name in ("snapshots", "checks", "results"):
         if (store / name).exists():
             shutil.rmtree(store / name)
     for name in ("report.md", "changes.patch"):
@@ -585,7 +665,8 @@ def run(args, root):
             error = None
             try:
                 code = run(argparse.Namespace(action="verify", command=check["command"],
-                           timeout=check["timeout"], kind=check["kind"], check_name=check["name"]), root)
+                           timeout=check["timeout"], kind=check["kind"], check_name=check["name"],
+                           junit=check["result_format"] == "junit"), root)
             except (OSError, ValueError) as exc:
                 code, error = 2, str(exc)
                 print(f"Check error: {error}")
@@ -650,16 +731,30 @@ def run(args, root):
             command = command[1:]
         if not command:
             raise ValueError("Provide a command after --")
+        template = list(command)
+        junit = getattr(args, "junit", False)
+        if junit != any("{junit}" in part for part in command):
+            raise ValueError("--junit and a command containing {junit} must be used together")
         before = fingerprint(*inventory(root))
         log = Path(STORE) / "checks" / (uuid.uuid4().hex[:12] + ".log")
         (root / log).parent.mkdir(parents=True, exist_ok=True)
+        result_path = None
+        if junit:
+            result_path = Path(STORE) / "results" / (log.stem + ".xml")
+            target = evidence_path(root, str(result_path))
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if target.exists():
+                raise ValueError("JUnit output path already exists; refusing to reuse evidence")
+            command = [part.replace("{junit}", str(target)) for part in command]
         timed_out = False
         termination_error = None
         import shlex
-        record = {"command": shlex.join(command), "exit_code": None,
+        record = {"command": shlex.join(command), "command_template": shlex.join(template), "exit_code": None,
                   "name": getattr(args, "check_name", None), "time": now(), "before": before,
                   "after": None, "log": str(log), "timed_out": False, "kind": args.kind,
                   "argv": command}
+        if junit:
+            record["test_results"] = {"status": "PENDING", "path": str(result_path)}
         state["checks"].append(record)
         save(store / "task.json", state)
         with (root / log).open("wb") as output:
@@ -695,6 +790,17 @@ def run(args, root):
             record["after"] = fingerprint(*inventory(root))
         except (OSError, ValueError) as exc:
             record["capture_error"] = str(exc)
+        if junit:
+            result = {"path": str(result_path)}
+            try:
+                result.update(parse_junit(evidence_path(root, str(result_path))))
+            except FileNotFoundError:
+                result.update(status="MISSING", error="This execution did not produce its JUnit report.")
+            except ValueError as exc:
+                result.update(status="INVALID", error=str(exc))
+            except OSError as exc:
+                result.update(status="UNREADABLE", error=str(exc))
+            record["test_results"] = result
         save(store / "task.json", state)
         print(f"{'PASS' if code == 0 else 'FAIL'} (exit {code}). Log: {log}")
         if code != 0:
@@ -705,6 +811,13 @@ def run(args, root):
         if record.get("capture_error"):
             print(f"Execution retained; file matching UNKNOWN: {record['capture_error']}")
             return 2
+        if junit:
+            print(f"JUnit: {record['test_results']['status']}; source: {result_path}")
+            if record["test_results"].get("counts"):
+                print("Reported tests: " + json.dumps(record["test_results"]["counts"]))
+            if not usable_test_results(record["test_results"]):
+                print("Test evidence needs review; zero/skipped-only cases or invalid/failed results are not a successful test check.")
+                return 1
         return 0 if code == 0 else 1
     elif args.action in ("report", "status"):
         if args.action == "report":
@@ -777,6 +890,7 @@ def main(argv=None):
     p = sub.add_parser("verify", help="Run a command, capture output and record workspace fingerprints")
     p.add_argument("--kind", choices=["test", "lint", "build", "other"], default="other",
                    help="Declared check type, not a correctness certification")
+    p.add_argument("--junit", action="store_true", help="Read this run's JUnit XML via a {junit} command placeholder")
     p.add_argument("--timeout", type=float, default=300)
     p.add_argument("command", nargs=argparse.REMAINDER)
     sub.add_parser("report", help="Write .agentproof/report.md")

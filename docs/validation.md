@@ -27,3 +27,16 @@ failure receipts, latest-check precedence, baseline diffs, missing logs, sequent
 archival and copy failure preserving active evidence. These checks exercise implementation
 behavior; they do not establish user time savings. A structured-result adapter, semantic
 acceptance mapping and native client integrations remain future work.
+
+## 0.5.0 JUnit evidence
+
+Controlled checks cover nested/namespaced suites, inconsistent counts, unsupported
+status metadata, parser limits, zero/skipped-only cases, missing/modified output, unique
+per-run paths, latest-result grouping and archived source XML.
+
+A separate clean wheel installation with a real pytest runner exercised three cases:
+one failure plus one pass and one skip, then a fix producing two passes and one skip.
+A skipped-only pytest run returned zero while AgentProof returned 1 for incomplete test
+evidence. XML tampering, archival and a second task were also checked. This is an
+engineering smoke test on a disposable project, not independent user validation or a
+measurement of human review time.

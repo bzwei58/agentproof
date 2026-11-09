@@ -17,8 +17,8 @@ def configured_checks(root):
         raise ValueError(f"{CONFIG} must contain version 1 and a nonempty checks list")
     result, names = [], set()
     for entry in data["checks"]:
-        if not isinstance(entry, dict) or set(entry) - {"name", "kind", "command", "timeout"}:
-            raise ValueError("Check entries support only name, kind, command and timeout")
+        if not isinstance(entry, dict) or set(entry) - {"name", "kind", "command", "timeout", "result_format"}:
+            raise ValueError("Check entries support only name, kind, command, timeout and result_format")
         name, kind, command = (entry.get(k) for k in ("name", "kind", "command"))
         timeout = entry.get("timeout", 300)
         if not isinstance(name, str) or not name.strip() or name in names:
@@ -34,6 +34,12 @@ def configured_checks(root):
             valid_timeout = False
         if not valid_timeout:
             raise ValueError(f"Timeout for {name} must be positive and finite")
+        result_format = entry.get("result_format")
+        if result_format not in (None, "junit"):
+            raise ValueError(f"Unsupported result_format for {name}")
+        if (result_format == "junit") != any("{junit}" in argument for argument in command):
+            raise ValueError(f"{name}: result_format junit requires a command containing {{junit}}")
         names.add(name)
-        result.append({"name": name, "kind": kind, "command": command, "timeout": timeout})
+        result.append({"name": name, "kind": kind, "command": command, "timeout": timeout,
+                       "result_format": result_format})
     return result
