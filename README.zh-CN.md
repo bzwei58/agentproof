@@ -9,24 +9,23 @@ AgentProof 先解决这些具体问题，不需要模型、API Key 或云服务�
 
 ## 安装
 
-需要 Python 3.10+、Git、macOS、Linux 或 Windows。PyPI 发布工作流已经准备好，但目前请从 GitHub 安装。
+需要 Python 3.10+、Git、macOS、Linux 或 Windows。已发布到 [PyPI](https://pypi.org/project/agentproof-cli/0.3.0/)。
 
-已[安装 pipx 并配置 PATH](https://pipx.pypa.io/stable/installation/) 时，一条命令即可从 GitHub 安装：
+已[安装 pipx 并配置 PATH](https://pipx.pypa.io/stable/installation/) 时，一条命令即可安装正式版本：
 
 ```bash
-pipx install 'git+https://github.com/bzwei58/agentproof.git@main'
+pipx install agentproof-cli==0.3.0
 ```
 
 之后在任意项目执行 `agentproof --version`。如果提示找不到命令，执行 `pipx ensurepath` 并重开终端。
 安装包名是 `agentproof-cli`，命令名是 `agentproof`；卸载命令为 `pipx uninstall agentproof-cli`。
-目前安装的是 main 分支最新代码，不是带版本标签的正式发行版。
+如需体验未发布的开发代码，可改装 `git+https://github.com/bzwei58/agentproof.git@main`。
 
 不用 pipx 也可以：先用 `python3 -m venv /你选择的路径/venv` 创建虚拟环境，再执行
-`/你选择的路径/venv/bin/python -m pip install 'git+https://github.com/bzwei58/agentproof.git@main'`。
+`/你选择的路径/venv/bin/python -m pip install agentproof-cli==0.3.0`。
 使用该目录下 `bin/agentproof` 的绝对路径调用，或激活虚拟环境。
 
 建议先完成[五分钟教程](docs/quickstart.zh-CN.md)：在独立临时目录里体验失败、修复、旧检查失效和报告。
-PyPI 可信发布者已配置；首次发布完成前，请从 GitHub 安装。
 
 ## 使用
 

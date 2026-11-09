@@ -33,7 +33,7 @@ PY
 
 ```bash
 agentproof init --goal "Correct the total price for multiple items"
-agentproof verify -- python3 -B -m unittest discover -v
+agentproof verify --kind test -- python3 -B -m unittest discover -v
 ```
 
 预期看到 **FAIL (exit 1)**，错误中包含 `15 != 36`，完整日志会保留。这里失败是正常结果，请继续。
@@ -46,7 +46,7 @@ def total_price(unit_price, quantity):
     return unit_price * quantity
 PY
 agentproof checkpoint --label "Correct quantity calculation"
-agentproof verify -- python3 -B -m unittest discover -v
+agentproof verify --kind test -- python3 -B -m unittest discover -v
 ```
 
 预期看到 **PASS (exit 0)**。这里确实执行了一个测试，不是“零测试通过”。
@@ -66,7 +66,7 @@ agentproof status
 ## 5. 验证当前代码，查看报告
 
 ```bash
-agentproof verify -- python3 -B -m unittest discover -v
+agentproof verify --kind test -- python3 -B -m unittest discover -v
 agentproof report
 printf 'Report: %s/.agentproof/report.md\n' "$PWD"
 ```
@@ -79,7 +79,7 @@ printf 'Report: %s/.agentproof/report.md\n' "$PWD"
 ## 放到真实任务中使用
 
 在一个新的 checkout/worktree 中，在 AI 修改前执行 `agentproof init --goal "任务目标"`。
-修改后，用 `agentproof verify -- 项目已有的测试命令` 记录检查，再生成报告。
+修改后，用 `agentproof verify --kind test -- 项目已有的测试命令` 记录检查，再生成报告。
 应使用项目实际的测试、构建或 lint 命令，工具不会自动发现检查命令。接受修改前仍需读日志和 diff。
 
 每个 checkout 暂支持一个任务。[试用指南](pilot.md) 提供了两个真实任务的反馈方式。
