@@ -2,6 +2,11 @@
 
 All notable changes to AgentProof are documented here.
 
+## 0.8.0 — 2026-11-10
+
+- Add `outcome` to record review time, whether a missed issue was found, the human decision and a note.
+- Surface recorded outcomes in task reports and machine-readable status output for ongoing dogfood analysis.
+
 ## 0.7.0 — 2026-11-10
 
 - Fold historical check executions into a collapsed human report section while retaining full JSON history.

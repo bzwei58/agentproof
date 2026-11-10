@@ -130,6 +130,16 @@ The repository also includes a GitHub Actions workflow that runs the configured 
 uploads `.agentproof/report.md`, logs and the captured diff as the `agentproof-report` artifact
 for each pull request. The artifact is evidence for review; it does not approve the pull request.
 
+After a real review, record a small outcome signal:
+
+```bash
+agentproof outcome --review-seconds 90 --found-issue --decision rejected \
+  --note "Found an uncovered timeout case"
+```
+
+These records are for measuring whether the report changes review effort and decisions over time;
+they do not claim independent market validation.
+
 ### Captured evidence
 
 - SHA-256 fingerprints and modes of captured files, plus full file checkpoints.

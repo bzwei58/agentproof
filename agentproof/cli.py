@@ -472,6 +472,7 @@ def assessment(root, state):
             "latest_checks": latest, "historical_checks": historical,
             "planned_checks": plan, "workspace_error": workspace_error,
             "acceptance": acceptance, "attention": attention, "review": review, "omitted": omitted,
+            "outcomes": state.get("outcomes", []),
             "limitations": "Command receipts and file changes do not certify task completion."}
 
 
@@ -594,6 +595,16 @@ def report(root, state, data=None, archived=False):
         lines += ["- " + "; ".join(f"{k}: {v}" for k, v in session["metrics"].items())]
     if not state["sessions"]:
         lines += ["No session imported."]
+    lines += ["", "## Human task outcomes", ""]
+    if data.get("outcomes"):
+        for outcome in data["outcomes"]:
+            duration = (f"; review seconds: {outcome['review_seconds']}"
+                        if outcome.get("review_seconds") is not None else "")
+            found = "; issue found" if outcome.get("found_issue") else "; no issue reported"
+            note = f"; {outcome['note']}" if outcome.get("note") else ""
+            lines.append(f"- {outcome['decision']}{duration}{found}{note} ({outcome['time']})")
+    else:
+        lines += ["No human outcome recorded. Run `agentproof outcome --decision ...` after review."]
     lines += ["", "Signals are heuristic observations, not proof of lost context or model errors.",
               "Imported sessions are not automatically correlated with this task's file changes.",
               "", "## Scope and limitations", "",
@@ -857,7 +868,7 @@ def run(args, root):
             with exclude_path.open("a", encoding="utf-8") as f:
                 f.write("\n/.agentproof/\n")
         state = {"version": 1, "goal": args.goal, "created": now(),
-                 "checkpoints": [], "checks": [], "sessions": [], "decisions": []}
+                 "checkpoints": [], "checks": [], "sessions": [], "decisions": [], "outcomes": []}
         if args.from_commit:
             state["baseline_mode"] = "historical_commit"
             state["baseline_commit"] = git(root, "rev-parse", "--verify", f"{args.from_commit}^{{commit}}").decode().strip()
@@ -916,6 +927,15 @@ def run(args, root):
             print(f"Reason: {args.reason}")
         if recorded["status"] == "STALE_CONFIRMATION":
             print("The decision was recorded, but its evidence is already stale; review and decide again.")
+        return 0
+    if args.action == "outcome":
+        if args.review_seconds is not None and args.review_seconds < 0:
+            raise ValueError("Review time cannot be negative")
+        state.setdefault("outcomes", []).append({
+            "time": now(), "review_seconds": args.review_seconds,
+            "found_issue": args.found_issue, "decision": args.decision, "note": args.note})
+        save(store / "task.json", state)
+        print("Recorded task outcome.")
         return 0
     if args.action == "check":
         planned = [{**c, "status": "NOT_RUN"} for c in checks]
@@ -1161,6 +1181,11 @@ def main(argv=None):
     p = sub.add_parser("reject", help="Record a human rejection for an acceptance item")
     p.add_argument("acceptance_id")
     p.add_argument("--reason", required=True, help="Reason the acceptance item was rejected")
+    p = sub.add_parser("outcome", help="Record the human result of reviewing this task")
+    p.add_argument("--review-seconds", type=float, help="Approximate time spent reviewing the report")
+    p.add_argument("--found-issue", action="store_true", help="The review found a missed problem")
+    p.add_argument("--decision", choices=["accepted", "rejected", "deferred"], required=True)
+    p.add_argument("--note", default="", help="Optional short observation")
     p = sub.add_parser("verify", help="Run a command, capture output and record workspace fingerprints")
     p.add_argument("--kind", choices=["test", "lint", "build", "other"], default="other",
                    help="Declared check type, not a correctness certification")

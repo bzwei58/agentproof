@@ -214,6 +214,16 @@ class WorkflowTest(unittest.TestCase):
         self.assertEqual(resumed['resumed_from'], task_id)
         self.assertTrue((archive / 'task.json').exists())
 
+    def test_outcome_records_real_review_signal(self):
+        self.init()
+        code, output = self.cli('outcome', '--review-seconds', '42', '--found-issue',
+                                '--decision', 'rejected', '--note', 'Found a missing edge case')
+        self.assertEqual(code, 0, output)
+        data = json.loads(self.cli('status', '--json')[1])
+        self.assertEqual(data['outcomes'][0]['review_seconds'], 42.0)
+        self.assertTrue(data['outcomes'][0]['found_issue'])
+        self.assertIn('Found a missing edge case', self.cli('status')[1])
+
     def test_interrupted_check_stops_remaining_commands_and_keeps_report(self):
         self.config([self.check(name='interrupted', script='raise SystemExit(130)'),
                      self.check(name='never-run', script='from pathlib import Path; Path("marker").touch()')])
