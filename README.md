@@ -105,6 +105,41 @@ Optional `acceptance` entries in `agentproof.json` connect a requirement to name
 human questions. Reports distinguish missing evidence from evidence that still needs review;
 they never turn a requirement into an automatic approval. See [configured checks](docs/checks.md).
 
+After reviewing the evidence, record the person's decision explicitly:
+
+```bash
+agentproof confirm timeout-no-double-charge --note "Reviewed the linked tests and diff."
+agentproof reject timeout-no-double-charge --reason "The lost-response scenario is not covered."
+```
+
+Decisions are tied to the current files, acceptance configuration and linked check receipts.
+If any of those change, the report shows `STALE_CONFIRMATION` and asks for a new decision.
+
+If the task started before AgentProof was initialized, `agentproof init --from-commit COMMIT --goal '...'`
+can capture a Git commit as an explicitly marked after-the-fact baseline. It helps compare files,
+but the report explains that it cannot prove the complete pre-AI state or process.
+
+Completed tasks can be inspected or resumed without changing the archive:
+
+```bash
+agentproof history show TASK_ID
+agentproof history resume TASK_ID
+```
+
+The repository also includes a GitHub Actions workflow that runs the configured checks and
+uploads `.agentproof/report.md`, logs and the captured diff as the `agentproof-report` artifact
+for each pull request. The artifact is evidence for review; it does not approve the pull request.
+
+After a real review, record a small outcome signal:
+
+```bash
+agentproof outcome --review-seconds 90 --found-issue --decision rejected \
+  --note "Found an uncovered timeout case"
+```
+
+These records are for measuring whether the report changes review effort and decisions over time;
+they do not claim independent market validation.
+
 ### Captured evidence
 
 - SHA-256 fingerprints and modes of captured files, plus full file checkpoints.

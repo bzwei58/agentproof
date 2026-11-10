@@ -19,6 +19,8 @@ class WorkflowTest(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name).resolve()
         subprocess.run(['git', 'init', '-q', str(self.root)], check=True)
+        subprocess.run(['git', '-C', str(self.root), 'config', 'user.name', 'AgentProof Test'], check=True)
+        subprocess.run(['git', '-C', str(self.root), 'config', 'user.email', 'test@example.invalid'], check=True)
         (self.root / 'app.py').write_text('old\n')
         self.cwd = Path.cwd()
         os.chdir(self.root)
@@ -84,6 +86,18 @@ class WorkflowTest(unittest.TestCase):
         report = self.cli('status', '--brief')[1]
         self.assertIn('Acceptance NEEDS_HUMAN_REVIEW', report)
 
+    def test_acceptance_files_are_preserved_in_json_and_report(self):
+        self.config([self.check(name='tests')])
+        config = json.loads((self.root / 'agentproof.json').read_text(encoding='utf-8'))
+        config['acceptance'] = [{'id': 'api', 'description': 'API remains compatible', 'checks': ['tests'],
+                                 'files': ['app.py', 'tests/test_api.py']}]
+        (self.root / 'agentproof.json').write_text(json.dumps(config), encoding='utf-8')
+        self.init()
+        self.assertEqual(self.cli('check')[0], 0)
+        data = json.loads(self.cli('status', '--json')[1])
+        self.assertEqual(data['acceptance'][0]['files'], ['app.py', 'tests/test_api.py'])
+        self.assertIn('`app.py`', self.cli('status')[1])
+
     def test_acceptance_missing_check_is_actionable_and_config_errors_are_rejected(self):
         self.config([self.check(name='tests')])
         config = json.loads((self.root / 'agentproof.json').read_text(encoding='utf-8'))
@@ -95,6 +109,240 @@ class WorkflowTest(unittest.TestCase):
         self.init()
         self.assertEqual(self.cli('check')[0], 0)
         self.assertEqual(json.loads(self.cli('status', '--json')[1])['acceptance'][0]['status'], 'NEEDS_HUMAN_REVIEW')
+
+    def acceptance_config(self, acceptance=None):
+        config = {'version': 1, 'checks': [self.check(name='tests')]}
+        if acceptance is not None:
+            config['acceptance'] = acceptance
+        (self.root / 'agentproof.json').write_text(json.dumps(config), encoding='utf-8')
+
+    def test_confirm_acceptance_item_records_decision(self):
+        self.acceptance_config([{'id': 'evidence-integrity', 'description': 'Evidence is coherent',
+                                 'checks': ['tests'], 'questions': ['Review the captured output.']}])
+        self.init()
+        self.assertEqual(self.cli('check')[0], 0)
+        code, output = self.cli('confirm', 'evidence-integrity', '--note', 'I reviewed the output.')
+        self.assertEqual(code, 0, output)
+        data = json.loads(self.cli('status', '--json')[1])
+        self.assertEqual(data['acceptance'][0]['status'], 'CONFIRMED')
+        self.assertEqual(data['acceptance'][0]['decision']['note'], 'I reviewed the output.')
+        self.assertIn('I reviewed the output.', self.cli('status')[1])
+
+    def test_reject_acceptance_item_records_reason(self):
+        self.acceptance_config([{'id': 'actionability', 'description': 'Review is actionable',
+                                 'checks': ['tests']}])
+        self.init()
+        self.assertEqual(self.cli('check')[0], 0)
+        code, output = self.cli('reject', 'actionability', '--reason', 'Missing timeout coverage')
+        self.assertEqual(code, 0, output)
+        data = json.loads(self.cli('status', '--json')[1])
+        self.assertEqual(data['acceptance'][0]['status'], 'REJECTED')
+        self.assertEqual(data['acceptance'][0]['decision']['reason'], 'Missing timeout coverage')
+
+    def test_confirmation_becomes_stale_after_file_change(self):
+        self.acceptance_config([{'id': 'evidence', 'description': 'Evidence is current', 'checks': ['tests']}])
+        self.init()
+        self.assertEqual(self.cli('check')[0], 0)
+        self.assertEqual(self.cli('confirm', 'evidence')[0], 0)
+        (self.root / 'app.py').write_text('changed\n')
+        data = json.loads(self.cli('status', '--json')[1])
+        self.assertEqual(data['acceptance'][0]['status'], 'STALE_CONFIRMATION')
+
+    def test_confirmation_becomes_stale_after_log_tampering(self):
+        self.acceptance_config([{'id': 'evidence', 'description': 'Evidence is intact', 'checks': ['tests']}])
+        self.init()
+        self.assertEqual(self.cli('check')[0], 0)
+        self.assertEqual(self.cli('confirm', 'evidence')[0], 0)
+        state = json.loads((self.root / '.agentproof/task.json').read_text(encoding='utf-8'))
+        log = self.root / state['checks'][-1]['log']
+        log.write_text(log.read_text(encoding='utf-8') + 'tampered\n', encoding='utf-8')
+        data = json.loads(self.cli('status', '--json')[1])
+        self.assertEqual(data['acceptance'][0]['status'], 'STALE_CONFIRMATION')
+
+    def test_confirmation_becomes_stale_after_rerun(self):
+        self.acceptance_config([{'id': 'evidence', 'description': 'Evidence is current', 'checks': ['tests']}])
+        self.init()
+        self.assertEqual(self.cli('check')[0], 0)
+        self.assertEqual(self.cli('confirm', 'evidence')[0], 0)
+        self.assertEqual(self.cli('check')[0], 0)
+        data = json.loads(self.cli('status', '--json')[1])
+        self.assertEqual(data['acceptance'][0]['status'], 'STALE_CONFIRMATION')
+
+    def test_unknown_acceptance_id_is_rejected(self):
+        self.acceptance_config([{'id': 'known', 'description': 'Known item', 'checks': ['tests']}])
+        self.init()
+        code, output = self.cli('confirm', 'missing')
+        self.assertEqual(code, 2)
+        self.assertIn('Unknown acceptance id', output)
+        state = json.loads((self.root / '.agentproof/task.json').read_text(encoding='utf-8'))
+        self.assertEqual(state['decisions'], [])
+
+    def test_legacy_task_without_decisions_remains_usable(self):
+        self.init()
+        path = self.root / '.agentproof/task.json'
+        state = json.loads(path.read_text(encoding='utf-8'))
+        state.pop('decisions', None)
+        path.write_text(json.dumps(state), encoding='utf-8')
+        self.assertEqual(self.cli('status', '--json')[0], 0)
+
+    def test_init_from_commit_records_after_the_fact_baseline(self):
+        (self.root / 'app.py').write_text('committed\n')
+        subprocess.run(['git', 'add', 'app.py'], check=True)
+        subprocess.run(['git', 'commit', '-qm', 'baseline'], check=True)
+        commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+        (self.root / 'app.py').write_text('current\n')
+        code, output = self.cli('init', '--goal', 'Historical review', '--from-commit', commit)
+        self.assertEqual(code, 0, output)
+        self.assertIn('after-the-fact baseline', output)
+        data = json.loads(self.cli('status', '--json')[1])
+        self.assertEqual(data['baseline_mode'], 'historical_commit')
+        self.assertEqual(data['baseline_commit'], commit)
+        self.assertIn('committed', self.cli('diff')[1])
+        self.assertEqual(self.cli('report')[0], 0)
+        self.assertIn('after-the-fact baseline', (self.root / '.agentproof/report.md').read_text(encoding='utf-8'))
+
+    def test_history_show_and_resume_keeps_archive_immutable(self):
+        self.init()
+        self.assertEqual(self.cli('verify', '--', sys.executable, '-c', 'print("ok")')[0], 0)
+        self.assertEqual(self.cli('finish')[0], 0)
+        archive = next((self.root / '.agentproof/history').iterdir())
+        task_id = archive.name
+        code, output = self.cli('history', 'show', task_id)
+        self.assertEqual(code, 0, output)
+        self.assertIn('Review workflow', output)
+        self.assertEqual(self.cli('history', 'resume', task_id)[0], 0)
+        self.assertTrue((self.root / '.agentproof/task.json').exists())
+        resumed = json.loads((self.root / '.agentproof/task.json').read_text(encoding='utf-8'))
+        self.assertEqual(resumed['resumed_from'], task_id)
+        self.assertTrue((archive / 'task.json').exists())
+
+    def decision_setup(self):
+        self.acceptance_config([{'id': 'evidence', 'description': 'Current evidence', 'checks': ['tests']}])
+        self.init()
+
+    def test_confirm_requires_current_successful_intact_evidence(self):
+        self.decision_setup()
+        self.assertEqual(self.cli('confirm', 'evidence')[0], 2)
+        self.assertEqual(self.cli('check')[0], 0)
+        state = json.loads((self.root / '.agentproof/task.json').read_text())
+        log = self.root / state['checks'][-1]['log']
+        original = log.read_bytes()
+        log.unlink()
+        self.assertEqual(self.cli('confirm', 'evidence')[0], 2)
+        log.write_bytes(original)
+        (self.root / 'app.py').write_text('changed')
+        self.assertEqual(self.cli('confirm', 'evidence')[0], 2)
+        self.assertEqual(self.cli('check')[0], 0)
+        self.assertEqual(self.cli('confirm', 'evidence')[0], 0)
+
+    def test_failed_check_cannot_be_confirmed_but_can_be_rejected(self):
+        self.decision_setup()
+        self.acceptance_config([{'id': 'evidence', 'description': 'Current evidence', 'checks': ['tests']}])
+        config = json.loads((self.root / 'agentproof.json').read_text())
+        config['checks'][0]['command'] = [sys.executable, '-c', 'raise SystemExit(1)']
+        (self.root / 'agentproof.json').write_text(json.dumps(config))
+        self.assertEqual(self.cli('check')[0], 1)
+        self.assertEqual(self.cli('confirm', 'evidence')[0], 2)
+        self.assertEqual(self.cli('reject', 'evidence', '--reason', 'Test failed')[0], 0)
+        self.assertEqual(json.loads(self.cli('status', '--json')[1])['acceptance'][0]['status'], 'REJECTED')
+        self.assertEqual(self.cli('reject', 'evidence', '--reason', '  ')[0], 2)
+
+    def test_confirmation_invalidates_on_xml_tampering_and_config_changes(self):
+        self.decision_setup()
+        config = json.loads((self.root / 'agentproof.json').read_text())
+        config['checks'] = [self.check(script='from pathlib import Path; import sys; '
+                            "Path(sys.argv[1]).write_text('<testsuite><testcase name=\"ok\"/></testsuite>')",
+                            result_format='junit')]
+        config['checks'][0]['command'].append('{junit}')
+        (self.root / 'agentproof.json').write_text(json.dumps(config))
+        self.assertEqual(self.cli('check')[0], 0)
+        self.assertEqual(self.cli('confirm', 'evidence')[0], 0)
+        state = json.loads((self.root / '.agentproof/task.json').read_text())
+        xml = self.root / state['checks'][-1]['test_results']['path']
+        xml.write_text('tampered')
+        self.assertEqual(json.loads(self.cli('status', '--json')[1])['acceptance'][0]['status'], 'STALE_CONFIRMATION')
+        self.assertEqual(self.cli('check')[0], 0)
+        self.assertEqual(self.cli('confirm', 'evidence')[0], 0)
+        config['acceptance'][0]['description'] = 'Updated requirement'
+        (self.root / 'agentproof.json').write_text(json.dumps(config))
+        self.assertEqual(json.loads(self.cli('status', '--json')[1])['acceptance'][0]['status'], 'STALE_CONFIRMATION')
+
+    def test_invalid_config_status_is_actionable(self):
+        self.init()
+        (self.root / 'agentproof.json').write_text('{}')
+        code, output = self.cli('status', '--json')
+        self.assertEqual(code, 0, output)
+        self.assertEqual(json.loads(output)['acceptance'][0]['status'], 'CONFIG_ERROR')
+
+    def test_resume_copy_failure_leaves_no_active_evidence_and_allows_retry(self):
+        self.init()
+        self.assertEqual(self.cli('verify', '--', sys.executable, '-c', 'print("ok")')[0], 0)
+        self.assertEqual(self.cli('finish')[0], 0)
+        archive = next((self.root / '.agentproof/history').iterdir())
+        before = {str(p.relative_to(archive)): p.read_bytes() for p in archive.rglob('*') if p.is_file()}
+        import shutil
+        real_copytree = shutil.copytree
+        def fail_copy(source, destination, *args, **kwargs):
+            if Path(source).name == 'checks':
+                raise OSError('disk full')
+            return real_copytree(source, destination, *args, **kwargs)
+        with patch('agentproof.cli.shutil.copytree', side_effect=fail_copy):
+            self.assertEqual(self.cli('history', 'resume', archive.name)[0], 2)
+        self.assertFalse((self.root / '.agentproof/task.json').exists())
+        self.assertFalse((self.root / '.agentproof/snapshots').exists())
+        self.assertFalse(list((self.root / '.agentproof').glob('.resume-*')))
+        self.assertEqual(before, {str(p.relative_to(archive)): p.read_bytes() for p in archive.rglob('*') if p.is_file()})
+        self.assertEqual(self.cli('history', 'resume', archive.name)[0], 0)
+
+    @unittest.skipIf(os.name == 'nt', 'POSIX symlink regression')
+    def test_resume_refuses_symlink_evidence(self):
+        self.init()
+        self.assertEqual(self.cli('finish')[0], 0)
+        archive = next((self.root / '.agentproof/history').iterdir())
+        (archive / 'escape').symlink_to(self.root / 'app.py')
+        self.assertEqual(self.cli('history', 'resume', archive.name)[0], 2)
+        self.assertFalse((self.root / '.agentproof/task.json').exists())
+
+    def test_outcome_rejects_nonfinite_time_and_keeps_unknown_issue_distinct(self):
+        self.init()
+        for value in ('nan', 'inf', '-1'):
+            self.assertEqual(self.cli('outcome', '--decision', 'deferred', '--review-seconds', value)[0], 2)
+        self.assertEqual(self.cli('outcome', '--decision', 'deferred')[0], 0)
+        self.assertIsNone(json.loads(self.cli('status', '--json')[1])['outcomes'][-1]['found_issue'])
+
+    def test_report_links_changed_files_and_lists_scenarios_once(self):
+        self.acceptance_config([{'id': 'api', 'description': 'API remains compatible',
+                                 'checks': ['tests'], 'files': ['app.py'],
+                                 'questions': ['Does the timeout scenario work?']}])
+        self.init()
+        (self.root / 'app.py').write_text('updated API')
+        self.assertEqual(self.cli('check')[0], 0)
+        content = (self.root / '.agentproof/report.md').read_text()
+        self.assertEqual(content.count('Does the timeout scenario work?'), 1)
+        self.assertIn('Check `tests`: PASS; CURRENT', content)
+        import re
+        target = re.search(r'\[diff\]\((diffs/[^)]+)\)', content).group(1)
+        self.assertTrue((self.root / '.agentproof' / target).exists())
+        self.assertIn('updated API', (self.root / '.agentproof' / target).read_text())
+        self.assertEqual(self.cli('finish')[0], 0)
+        archive = next((self.root / '.agentproof/history').iterdir())
+        self.assertTrue((archive / target).exists())
+        self.assertIn('[checks/', (archive / 'report.md').read_text())
+
+    def test_acceptance_paths_reject_unsafe_or_nonportable_names(self):
+        for name in ('../outside', '/absolute', 'C:/absolute', '.agentproof/task.json', 'a\\b'):
+            self.acceptance_config([{'id': 'api', 'description': 'Test paths', 'files': [name]}])
+            self.assertEqual(self.cli('check', '--list')[0], 2, name)
+
+    def test_outcome_records_real_review_signal(self):
+        self.init()
+        code, output = self.cli('outcome', '--review-seconds', '42', '--found-issue',
+                                '--decision', 'rejected', '--note', 'Found a missing edge case')
+        self.assertEqual(code, 0, output)
+        data = json.loads(self.cli('status', '--json')[1])
+        self.assertEqual(data['outcomes'][0]['review_seconds'], 42.0)
+        self.assertTrue(data['outcomes'][0]['found_issue'])
+        self.assertIn('Found a missing edge case', self.cli('status')[1])
 
     def test_interrupted_check_stops_remaining_commands_and_keeps_report(self):
         self.config([self.check(name='interrupted', script='raise SystemExit(130)'),
@@ -169,6 +417,20 @@ class WorkflowTest(unittest.TestCase):
         data = json.loads(self.cli('status', '--json')[1])
         self.assertFalse(any('FAIL:' in x for x in data['attention']))
         self.assertEqual(len(data['checks']), 2)
+
+    def test_report_folds_historical_checks_but_json_keeps_them(self):
+        self.config([self.check(name='tests', script='raise SystemExit(4)')])
+        self.init()
+        self.assertEqual(self.cli('check')[0], 1)
+        self.config([self.check(name='tests', script='print("recovered")')])
+        self.assertEqual(self.cli('check')[0], 0)
+        data = json.loads(self.cli('status', '--json')[1])
+        self.assertEqual(len(data['checks']), 2)
+        self.assertEqual(len(data['latest_checks']), 1)
+        self.assertEqual(len(data['historical_checks']), 1)
+        report = self.cli('status')[1]
+        self.assertIn('Historical checks (collapsed)', report)
+        self.assertEqual(report.count('## Verification'), 1)
 
     def test_latest_failure_removes_earlier_receipt_for_same_command(self):
         self.config([self.check(script='from pathlib import Path; '

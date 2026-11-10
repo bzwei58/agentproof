@@ -1,0 +1,48 @@
+name: AgentProof review report
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  evidence:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install AgentProof
+        run: python -m pip install -e .
+      - name: Capture task baseline
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ -n "$BASE_SHA" ]; then
+            agentproof init --from-commit "$BASE_SHA" --goal "Review pull request changes"
+          else
+            agentproof init --from-commit HEAD --goal "Review current revision"
+          fi
+      - name: Run configured checks
+        run: agentproof check
+      - name: Refresh report and assessment
+        if: always()
+        run: |
+          agentproof report
+          agentproof status --json > .agentproof/assessment.json
+          agentproof status --brief >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload AgentProof report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agentproof-report
+          path: .agentproof/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7

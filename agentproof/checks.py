@@ -1,6 +1,7 @@
 """Explicit, reusable project checks; no command discovery or shell evaluation."""
 import json
 import math
+from pathlib import PurePosixPath, PureWindowsPath
 
 
 CONFIG = "agentproof.json"
@@ -12,8 +13,8 @@ def configured_checks(root):
         raise ValueError(f"Create {CONFIG} with an explicit checks list first; see docs/checks.md")
     data = json.loads(path.read_text(encoding="utf-8"))
     if (not isinstance(data, dict) or set(data) - {"version", "checks", "acceptance"}
-            or type(data["version"]) is not int or data["version"] != 1
-            or not isinstance(data["checks"], list) or not data["checks"]):
+            or type(data.get("version")) is not int or data["version"] != 1
+            or not isinstance(data.get("checks"), list) or not data["checks"]):
         raise ValueError(f"{CONFIG} must contain version 1 and a nonempty checks list")
     result, names = [], set()
     for entry in data["checks"]:
@@ -47,16 +48,23 @@ def configured_checks(root):
         raise ValueError("acceptance must be an array")
     ids = set()
     for item in acceptance:
-        if (not isinstance(item, dict) or set(item) - {"id", "description", "checks", "questions"}
+        if (not isinstance(item, dict) or set(item) - {"id", "description", "checks", "questions", "files"}
                 or not isinstance(item.get("id"), str) or not item["id"].strip()
                 or item["id"] in ids or not isinstance(item.get("description"), str)
                 or not item["description"].strip()):
             raise ValueError("Acceptance items require unique id and description")
         checks_for_item = item.get("checks", [])
         questions = item.get("questions", [])
-        if (not isinstance(checks_for_item, list) or any(x not in names for x in checks_for_item)
-                or not isinstance(questions, list) or any(not isinstance(x, str) or not x.strip() for x in questions)):
+        files = item.get("files", [])
+        if (not isinstance(checks_for_item, list) or any(not isinstance(x, str) or x not in names for x in checks_for_item)
+                or not isinstance(questions, list) or any(not isinstance(x, str) or not x.strip() for x in questions)
+                or not isinstance(files, list) or any(not isinstance(x, str) or not x.strip() for x in files)):
             raise ValueError(f"Invalid acceptance mapping for {item['id']}")
+        for name in files:
+            path = PurePosixPath(name)
+            if ("\x00" in name or "\\" in name or path.is_absolute() or PureWindowsPath(name).drive
+                    or ".." in path.parts or not path.parts or path.parts[0] in {".git", ".agentproof"}):
+                raise ValueError(f"Acceptance files must be repository-relative paths: {name}")
         ids.add(item["id"])
     return result
 

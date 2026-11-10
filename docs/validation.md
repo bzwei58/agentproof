@@ -52,3 +52,21 @@ Controlled tests cover evidence levels, actionable next steps, valid acceptance 
 missing linked checks and human-question output. These features organize evidence; they do
 not decide whether a requirement is substantively satisfied. Independent user validation
 and measured review-time impact remain outstanding.
+
+## 0.8.0 human review workflow
+
+The repository's own 0.8.0 development is the first maintainer-owned real AI coding task
+for this workflow. Engineering observations are distinct from a human review outcome:
+review time, perceived effort and acceptance remain pending until the reviewer supplies them.
+
+Controlled regression checks cover missing/failed/stale confirmation evidence, log and XML
+tampering, changed configuration, transactional resume failure and retry, symlink refusal,
+file-diff links and outcome inputs. The suite has 89 tests: on macOS 88 pass and the Windows
+process-tree regression is skipped. Source distributions include the shared test helpers;
+tests also pass after extracting the sdist. A clean wheel install exercises checks,
+confirmation, archival, resume and report generation in a disposable repository.
+
+The PR #18 Actions report was downloaded and inspected: it used the base commit, contained
+actual changed files and intact current check logs, and every relative Markdown evidence link
+resolved inside the artifact. Both acceptance items remained NEEDS_HUMAN_REVIEW. These
+observations establish the delivery mechanics; they do not measure review-time savings.

@@ -2,6 +2,20 @@
 
 All notable changes to AgentProof are documented here.
 
+## 0.8.0 — 2026-11-10
+
+This release combines the previously unreleased 0.6.0 and 0.7.0 development changes.
+
+- Record human acceptance with `confirm` / `reject`; confirmation requires current successful linked evidence.
+- Invalidate decisions when files, configuration, check receipts, logs or JUnit results change.
+- Collapse historical checks while preserving every execution in JSON and archived evidence.
+- Capture explicitly marked after-the-fact baselines with `init --from-commit`.
+- Inspect and resume archived tasks without changing the archive; failed resumes clean up staged evidence.
+- Link acceptance scenarios to source/test files, individual diffs, logs, JUnit failures and human questions.
+- Generate pull request reports against the base commit in GitHub Actions; upload complete evidence artifacts.
+- Record review outcomes with optional duration, issue result and notes; unknown issue results remain distinct from no issue found.
+- Make CI tests independent of global Git identity and handle invalid configuration with actionable reports.
+
 ## 0.5.1 — 2026-11-10
 
 - Add explicit evidence levels: `NO_EVIDENCE`, `PARTIAL_EVIDENCE` and `EVIDENCE_NEEDS_REVIEW`.
