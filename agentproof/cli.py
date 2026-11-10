@@ -216,7 +216,7 @@ def checkpoint_from_commit(root, state, commit, label):
         header, name_bytes = raw.split(b"\t", 1)
         mode, kind, _object = header.decode("ascii").split(" ", 2)
         name = os.fsdecode(name_bytes)
-        if kind != "blob":
+        if kind != "blob" or mode not in {"100644", "100755"}:
             omitted.append({"path": name, "reason": "not a regular file in commit"})
             continue
         if sensitive(name):
@@ -324,7 +324,7 @@ def acceptance_assessment(root, latest, workspace_error):
         items = configured_acceptance(root)
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         return [{"id": "config", "description": "Invalid acceptance configuration", "status": "CONFIG_ERROR",
-                 "checks": [], "questions": [str(exc)]}]
+                 "checks": [], "questions": [str(exc)], "next_steps": [f"Fix agentproof.json: {exc}"]}]
     result = []
     by_name = {check.get("name"): check for check in latest}
     for item in items:
@@ -353,7 +353,8 @@ def acceptance_fingerprint(items):
 def decision_check_snapshot(check):
     """Keep the evidence identity a human decision was made against."""
     result = {key: check.get(key) for key in
-              ("name", "log", "log_sha256", "before", "after", "execution", "workspace", "log_integrity")}
+              ("name", "command", "log", "log_sha256", "before", "after", "execution", "workspace",
+               "log_integrity", "capture_error", "termination_error", "usable")}
     tests = check.get("test_results")
     if tests is not None:
         result["test_results"] = {key: tests.get(key) for key in ("path", "sha256", "size", "status")}
@@ -379,15 +380,18 @@ def apply_decisions(root, state, acceptance, latest, current_fp):
         expected = {name: decision_check_snapshot(by_name[name]) for name in item.get("checks", [])
                     if name in by_name}
         recorded = {entry.get("name"): entry for entry in decision.get("checks", [])}
-        valid = (decision.get("workspace_fingerprint") == current_fp
+        valid = (current_fp is not None and config_fp is not None
+                 and decision.get("workspace_fingerprint") == current_fp
                  and decision.get("acceptance_fingerprint") == config_fp
                  and set(recorded) == set(expected)
-                 and all(recorded[name] == expected[name] for name in expected))
+                 and all(recorded[name] == expected[name] for name in expected)
+                 and decision.get("status") in {"CONFIRMED", "REJECTED"}
+                 and (decision["status"] != "CONFIRMED" or item["status"] == "NEEDS_HUMAN_REVIEW"))
         if valid:
             item["status"] = decision.get("status", "STALE_CONFIRMATION")
             item["decision"] = {key: decision.get(key) for key in
                                  ("status", "note", "reason", "time") if decision.get(key) is not None}
-            item["next_steps"] = (["Review the recorded confirmation and linked evidence." ]
+            item["next_steps"] = ([]
                                    if item["status"] == "CONFIRMED" else
                                    ["Address the rejection reason and confirm again."])
         else:
@@ -812,6 +816,46 @@ def finish_task(root, state):
     return destination
 
 
+def resume_task(store, archive, task):
+    """Stage a complete evidence copy before publishing an active task."""
+    names = ("snapshots", "checks", "results")
+    if (store / "task.json").exists():
+        raise ValueError("An active task already exists; finish it before resuming history")
+    if any((store / name).exists() or (store / name).is_symlink() for name in names):
+        raise ValueError("Active evidence directories already exist; inspect them before resuming")
+    if archive.is_symlink() or archive.parent.is_symlink():
+        raise ValueError("Archived evidence must not contain symlinks")
+    for path in archive.rglob("*"):
+        if path.is_symlink():
+            raise ValueError("Archived evidence must not contain symlinks")
+    staging = store / (".resume-" + uuid.uuid4().hex)
+    staging.mkdir()
+    moved = []
+    try:
+        for name in names:
+            source = archive / name
+            if source.exists():
+                shutil.copytree(source, staging / name)
+        resumed = {key: value for key, value in task.items() if key not in {"id", "finished"}}
+        resumed.update(resumed_from=task.get("id", archive.name), resumed_at=now())
+        save(staging / "task.json", resumed)
+        for name in (*names, "task.json"):
+            source = staging / name
+            if source.exists():
+                source.replace(store / name)
+                moved.append(name)
+    except BaseException:
+        for name in reversed(moved):
+            destination = store / name
+            if destination.is_dir():
+                shutil.rmtree(destination)
+            else:
+                destination.unlink(missing_ok=True)
+        raise
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
+
+
 def run(args, root):
     store = root / STORE
     if args.action == "history":
@@ -831,16 +875,7 @@ def run(args, root):
                     print(f"Report: {archive.parent / 'report.md'}")
                     print(f"Evidence: {archive.parent}")
                 return 0
-            if (store / "task.json").exists():
-                raise ValueError("An active task already exists; finish it before resuming history")
-            for name in ("snapshots", "checks", "results"):
-                source = archive.parent / name
-                if source.exists():
-                    shutil.copytree(source, store / name)
-            resumed = {key: value for key, value in task.items() if key not in {"id", "finished"}}
-            resumed["resumed_from"] = task.get("id", archive.parent.name)
-            resumed["resumed_at"] = now()
-            save(store / "task.json", resumed)
+            resume_task(store, archive.parent, task)
             print(f"Resumed archived task: {task.get('id', archive.parent.name)}")
             print("The archive remains unchanged; new evidence will be recorded in the active task.")
             return 0
@@ -906,6 +941,13 @@ def run(args, root):
         except (OSError, ValueError, json.JSONDecodeError) as exc:
             raise ValueError(f"Cannot record a decision: {exc}") from exc
         by_name = {check.get("name"): check for check in latest}
+        if args.action == "confirm":
+            missing = [name for name in item.get("checks", [])
+                       if name not in by_name or not by_name[name]["usable"]]
+            if missing:
+                raise ValueError("Cannot confirm without current successful evidence: " + ", ".join(missing))
+        elif not args.reason.strip():
+            raise ValueError("A nonempty rejection reason is required")
         decision = {"acceptance_id": args.acceptance_id,
                     "status": "CONFIRMED" if args.action == "confirm" else "REJECTED",
                     "time": now(), "workspace_fingerprint": current_fp,
@@ -929,8 +971,8 @@ def run(args, root):
             print("The decision was recorded, but its evidence is already stale; review and decide again.")
         return 0
     if args.action == "outcome":
-        if args.review_seconds is not None and args.review_seconds < 0:
-            raise ValueError("Review time cannot be negative")
+        if args.review_seconds is not None and (not math.isfinite(args.review_seconds) or args.review_seconds < 0):
+            raise ValueError("Review time must be finite and nonnegative")
         state.setdefault("outcomes", []).append({
             "time": now(), "review_seconds": args.review_seconds,
             "found_issue": args.found_issue, "decision": args.decision, "note": args.note})
@@ -1183,7 +1225,10 @@ def main(argv=None):
     p.add_argument("--reason", required=True, help="Reason the acceptance item was rejected")
     p = sub.add_parser("outcome", help="Record the human result of reviewing this task")
     p.add_argument("--review-seconds", type=float, help="Approximate time spent reviewing the report")
-    p.add_argument("--found-issue", action="store_true", help="The review found a missed problem")
+    issue = p.add_mutually_exclusive_group()
+    issue.add_argument("--found-issue", action="store_true", dest="found_issue", default=None,
+                       help="The review found a missed problem")
+    issue.add_argument("--no-issue", action="store_false", dest="found_issue", help="No problem was found")
     p.add_argument("--decision", choices=["accepted", "rejected", "deferred"], required=True)
     p.add_argument("--note", default="", help="Optional short observation")
     p = sub.add_parser("verify", help="Run a command, capture output and record workspace fingerprints")
