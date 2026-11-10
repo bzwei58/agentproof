@@ -245,6 +245,20 @@ class WorkflowTest(unittest.TestCase):
         self.assertFalse(any('FAIL:' in x for x in data['attention']))
         self.assertEqual(len(data['checks']), 2)
 
+    def test_report_folds_historical_checks_but_json_keeps_them(self):
+        self.config([self.check(name='tests', script='raise SystemExit(4)')])
+        self.init()
+        self.assertEqual(self.cli('check')[0], 1)
+        self.config([self.check(name='tests', script='print("recovered")')])
+        self.assertEqual(self.cli('check')[0], 0)
+        data = json.loads(self.cli('status', '--json')[1])
+        self.assertEqual(len(data['checks']), 2)
+        self.assertEqual(len(data['latest_checks']), 1)
+        self.assertEqual(len(data['historical_checks']), 1)
+        report = self.cli('status')[1]
+        self.assertIn('Historical checks (collapsed)', report)
+        self.assertEqual(report.count('## Verification'), 1)
+
     def test_latest_failure_removes_earlier_receipt_for_same_command(self):
         self.config([self.check(script='from pathlib import Path; '
                                 'raise SystemExit(4 if Path(".agentproof/fail").exists() else 0)')])

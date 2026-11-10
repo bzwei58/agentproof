@@ -372,6 +372,8 @@ def assessment(root, state):
                "log_sha256": c.get("log_sha256"), "before": c.get("before"), "after": c.get("after"),
                **check_evidence(root, c, current_fp)} for c in state["checks"]]
     latest = latest_check_records(checks)
+    latest_ids = {id(check) for check in latest}
+    historical = [check for check in checks if id(check) not in latest_ids]
     acceptance = acceptance_assessment(root, latest, workspace_error)
     acceptance = apply_decisions(root, state, acceptance, latest, current_fp)
     attention = []
@@ -422,7 +424,7 @@ def assessment(root, state):
         attention.append("No completion claims supplied. Review the goal and relevant diff manually.")
     return {"schema_version": 1, "goal": state["goal"], "generated": now(),
             "changes": [{"kind": k, "path": p} for k, p in changed], "checks": checks,
-            "latest_checks": latest,
+            "latest_checks": latest, "historical_checks": historical,
             "planned_checks": plan, "workspace_error": workspace_error,
             "acceptance": acceptance, "attention": attention, "review": review, "omitted": omitted,
             "limitations": "Command receipts and file changes do not certify task completion."}
@@ -467,7 +469,10 @@ def report(root, state, data=None, archived=False):
     lines += ["", "## Verification", ""]
     if not state["checks"]:
         lines += ["No verification commands recorded."]
-    for check, evidence in zip(state["checks"], data["checks"]):
+    current_checks = data.get("latest_checks", data["checks"])
+    by_log = {check.get("log"): check for check in state["checks"]}
+    current_state_checks = [by_log.get(check.get("log"), check) for check in current_checks]
+    for check, evidence in zip(current_state_checks, current_checks):
         freshness = {"CURRENT": "matches current captured files", "STALE": "STALE / files changed",
                      "UNKNOWN": "UNKNOWN / file matching unavailable"}[evidence["workspace"]]
         status = evidence["execution"]
@@ -505,6 +510,17 @@ def report(root, state, data=None, archived=False):
             fence = "`" * max(3, max((len(x) for x in re.findall(r"`+", command)), default=0) + 1)
             lines += ["", "<details>", "<summary>Full command</summary>", "",
                       fence + "sh", command, fence, "", "</details>", ""]
+    historical = data.get("historical_checks", [])
+    if historical:
+        lines += ["", "<details>", "<summary>Historical checks (collapsed)</summary>", "",
+                  "Older executions remain available in `status --json` and their evidence logs.", ""]
+        for check in historical:
+            label = check.get("name") or check.get("command", "")
+            lines.append(f"- **{check.get('execution', 'UNKNOWN')}** `{label}` — "
+                         f"log: `{source_label(check.get('log', ''))}`; "
+                         f"workspace: {check.get('workspace', 'UNKNOWN')}; "
+                         f"log integrity: {check.get('log_integrity', 'UNKNOWN')}")
+        lines += ["", "</details>"]
     if data["planned_checks"]:
         lines += ["", "## Latest configured run", ""]
         lines += [f"- **{step['status']}** `{step['name']}` — declared kind: {step['kind']}"
