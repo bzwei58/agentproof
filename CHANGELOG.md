@@ -7,6 +7,7 @@ All notable changes to AgentProof are documented here.
 - Fold historical check executions into a collapsed human report section while retaining full JSON history.
 - Add `history show TASK_ID` and `history resume TASK_ID`; archives remain immutable when resumed.
 - Allow acceptance items to list related source and test files; surface them in reports.
+- Add a GitHub Actions workflow that uploads the report, logs and captured diff as an artifact.
 
 ## 0.6.0 — 2026-11-10
 

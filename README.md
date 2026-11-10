@@ -126,6 +126,10 @@ agentproof history show TASK_ID
 agentproof history resume TASK_ID
 ```
 
+The repository also includes a GitHub Actions workflow that runs the configured checks and
+uploads `.agentproof/report.md`, logs and the captured diff as the `agentproof-report` artifact
+for each pull request. The artifact is evidence for review; it does not approve the pull request.
+
 ### Captured evidence
 
 - SHA-256 fingerprints and modes of captured files, plus full file checkpoints.
