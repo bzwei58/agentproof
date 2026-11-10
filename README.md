@@ -54,7 +54,7 @@ that repository's root. One active task is supported per checkout; archive it wi
    explicitly use `sh -c '...'` if you need shell syntax. Only run commands you trust.
 5. **Optionally import session signals.** `agentproof import-session /path/to/session.jsonl`.
 6. **Review AI claims.** `agentproof review --summary ai-summary.txt` (one claim per line), or repeat
-   `--claim "All tests passed"`. Completion claims remain `UNVERIFIED`; matching command receipts are shown separately.
+   `--claim "All tests passed"`. Completion claims remain `UNVERIFIED`; matching command receipts are shown separately with evidence levels and next steps.
 7. **Review.** `agentproof status` prints evidence; `agentproof report` writes Markdown.
 8. **Recover selected snapshot contents.** `agentproof restore CHECKPOINT_ID` previews changes;
    add `--apply` to write them, after an automatic backup checkpoint.
@@ -98,6 +98,12 @@ The report shows reporter-provided test counts, failures, errors and skips, with
 bounded failure details. Every execution gets a unique output path. Missing, invalid, inconsistent,
 modified, zero-test or skipped-only results need review; a zero command exit does not
 override failed test results. [JUnit usage and boundaries](docs/junit.md).
+
+### Acceptance items (0.5.1+)
+
+Optional `acceptance` entries in `agentproof.json` connect a requirement to named checks and
+human questions. Reports distinguish missing evidence from evidence that still needs review;
+they never turn a requirement into an automatic approval. See [configured checks](docs/checks.md).
 
 ### Captured evidence
 

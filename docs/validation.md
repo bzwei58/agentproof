@@ -45,3 +45,10 @@ A full-project pytest run exposed a suite total differing from its testcase reco
 count when subtests were reported. Both values are now retained as INCONSISTENT
 evidence, never treated as a complete successful test report. The discrepancy is
 displayed for review rather than silently normalized.
+
+## 0.5.1 evidence levels and acceptance mapping
+
+Controlled tests cover evidence levels, actionable next steps, valid acceptance mappings,
+missing linked checks and human-question output. These features organize evidence; they do
+not decide whether a requirement is substantively satisfied. Independent user validation
+and measured review-time impact remain outstanding.

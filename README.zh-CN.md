@@ -100,6 +100,11 @@ agentproof verify --kind test --junit -- python -m pytest '--junitxml={junit}'
 结果缺失、无效、计数不一致、被修改、零测试或全部跳过会明确提示；报告存在失败时，即使命令返回 0，检查也返回 1。
 这些是测试报告提供的数据，仍不能证明业务正确性或覆盖范围。[详细说明](docs/junit.md)。
 
+### 验收项（0.5.1+）
+
+可在 `agentproof.json` 的 `acceptance` 中把需求连接到检查命令和人工确认问题。
+报告会区分缺少证据与有证据但仍需审查，永远不会自动批准需求。[配置说明](docs/checks.md)。
+
 ### 捕获的证据
 
 - 保存 Git 已跟踪文件及未被忽略的新文件，保留初始未提交内容，不创建 Git 提交。
@@ -109,7 +114,7 @@ agentproof verify --kind test --junit -- python -m pytest '--junitxml={junit}'
 - 记录命令真实退出码、输出和超时；检查自己改了文件也会标记为旧证据。
 - 导入 Claude Code 风格 JSONL，统计工具调用、工具错误、上下文压缩、截断标记及坏行。
 - 生成本地 Markdown 报告，明确记录已知事实与未验证范围。
-- `review` 将 AI 的完成声明与文件变化、最新检查结果匹配，自然语言声明保持 **UNVERIFIED（待核实）**；匹配的命令执行记录单独展示。
+- `review` 将 AI 的完成声明与文件变化、最新检查结果匹配，自然语言声明保持 **UNVERIFIED（待核实）**；匹配的命令执行记录单独展示，并标注证据等级和下一步。
 
 ## 边界
 

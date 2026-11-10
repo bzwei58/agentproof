@@ -11,7 +11,7 @@ def configured_checks(root):
     if not path.is_file():
         raise ValueError(f"Create {CONFIG} with an explicit checks list first; see docs/checks.md")
     data = json.loads(path.read_text(encoding="utf-8"))
-    if (not isinstance(data, dict) or set(data) != {"version", "checks"}
+    if (not isinstance(data, dict) or set(data) - {"version", "checks", "acceptance"}
             or type(data["version"]) is not int or data["version"] != 1
             or not isinstance(data["checks"], list) or not data["checks"]):
         raise ValueError(f"{CONFIG} must contain version 1 and a nonempty checks list")
@@ -42,4 +42,30 @@ def configured_checks(root):
         names.add(name)
         result.append({"name": name, "kind": kind, "command": command, "timeout": timeout,
                        "result_format": result_format})
+    acceptance = data.get("acceptance", [])
+    if not isinstance(acceptance, list):
+        raise ValueError("acceptance must be an array")
+    ids = set()
+    for item in acceptance:
+        if (not isinstance(item, dict) or set(item) - {"id", "description", "checks", "questions"}
+                or not isinstance(item.get("id"), str) or not item["id"].strip()
+                or item["id"] in ids or not isinstance(item.get("description"), str)
+                or not item["description"].strip()):
+            raise ValueError("Acceptance items require unique id and description")
+        checks_for_item = item.get("checks", [])
+        questions = item.get("questions", [])
+        if (not isinstance(checks_for_item, list) or any(x not in names for x in checks_for_item)
+                or not isinstance(questions, list) or any(not isinstance(x, str) or not x.strip() for x in questions)):
+            raise ValueError(f"Invalid acceptance mapping for {item['id']}")
+        ids.add(item["id"])
     return result
+
+
+def configured_acceptance(root):
+    """Return optional requirement-to-check mappings from the same validated config."""
+    path = root / CONFIG
+    if not path.is_file():
+        return []
+    data = json.loads(path.read_text(encoding="utf-8"))
+    configured_checks(root)
+    return data.get("acceptance", [])
