@@ -47,15 +47,17 @@ def configured_checks(root):
         raise ValueError("acceptance must be an array")
     ids = set()
     for item in acceptance:
-        if (not isinstance(item, dict) or set(item) - {"id", "description", "checks", "questions"}
+        if (not isinstance(item, dict) or set(item) - {"id", "description", "checks", "questions", "files"}
                 or not isinstance(item.get("id"), str) or not item["id"].strip()
                 or item["id"] in ids or not isinstance(item.get("description"), str)
                 or not item["description"].strip()):
             raise ValueError("Acceptance items require unique id and description")
         checks_for_item = item.get("checks", [])
         questions = item.get("questions", [])
+        files = item.get("files", [])
         if (not isinstance(checks_for_item, list) or any(x not in names for x in checks_for_item)
-                or not isinstance(questions, list) or any(not isinstance(x, str) or not x.strip() for x in questions)):
+                or not isinstance(questions, list) or any(not isinstance(x, str) or not x.strip() for x in questions)
+                or not isinstance(files, list) or any(not isinstance(x, str) or not x.strip() for x in files)):
             raise ValueError(f"Invalid acceptance mapping for {item['id']}")
         ids.add(item["id"])
     return result

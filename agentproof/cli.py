@@ -339,7 +339,8 @@ def acceptance_assessment(root, latest, workspace_error):
             status = "NEEDS_HUMAN_REVIEW"
             next_steps = list(item.get("questions", [])) or ["Confirm that the linked checks cover this acceptance item."]
         result.append({"id": item["id"], "description": item["description"], "status": status,
-                       "checks": item.get("checks", []), "questions": item.get("questions", []),
+                       "checks": item.get("checks", []), "files": item.get("files", []),
+                       "questions": item.get("questions", []),
                        "next_steps": next_steps})
     return result
 
@@ -484,6 +485,8 @@ def brief_report(data):
                   for item in data["review"]["items"]]
     for item in data.get("acceptance", []):
         lines.append(f"- Acceptance **{item['status']}** `{item['id']}`: {item['description']}")
+        if item.get("files"):
+            lines.append("  - Files: " + ", ".join(f"`{path}`" for path in item["files"]))
         if item.get("decision"):
             decision = item["decision"]
             detail = decision.get("note") or decision.get("reason")
@@ -576,6 +579,8 @@ def report(root, state, data=None, archived=False):
         lines += ["", "## Human acceptance decisions", ""]
         for item in data["acceptance"]:
             lines.append(f"- **{item['status']}** `{item['id']}` — {item['description']}")
+            if item.get("files"):
+                lines.append("  - Files: " + ", ".join(f"`{path}`" for path in item["files"]))
             decision = item.get("decision")
             if decision:
                 if decision.get("note"):

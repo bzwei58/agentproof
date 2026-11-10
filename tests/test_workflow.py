@@ -84,6 +84,18 @@ class WorkflowTest(unittest.TestCase):
         report = self.cli('status', '--brief')[1]
         self.assertIn('Acceptance NEEDS_HUMAN_REVIEW', report)
 
+    def test_acceptance_files_are_preserved_in_json_and_report(self):
+        self.config([self.check(name='tests')])
+        config = json.loads((self.root / 'agentproof.json').read_text(encoding='utf-8'))
+        config['acceptance'] = [{'id': 'api', 'description': 'API remains compatible', 'checks': ['tests'],
+                                 'files': ['app.py', 'tests/test_api.py']}]
+        (self.root / 'agentproof.json').write_text(json.dumps(config), encoding='utf-8')
+        self.init()
+        self.assertEqual(self.cli('check')[0], 0)
+        data = json.loads(self.cli('status', '--json')[1])
+        self.assertEqual(data['acceptance'][0]['files'], ['app.py', 'tests/test_api.py'])
+        self.assertIn('`app.py`', self.cli('status')[1])
+
     def test_acceptance_missing_check_is_actionable_and_config_errors_are_rejected(self):
         self.config([self.check(name='tests')])
         config = json.loads((self.root / 'agentproof.json').read_text(encoding='utf-8'))
