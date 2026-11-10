@@ -106,6 +106,7 @@ the tool understands business correctness.
       "id": "timeout-no-double-charge",
       "description": "A client timeout does not charge the customer twice",
       "checks": ["payment-tests"],
+      "files": ["payment.py", "tests/payment/test_timeout.py"],
       "questions": [
         "Does the test cover server-side success followed by a lost client response?",
         "Does the assertion check the number of charges, not only the response code?"
@@ -153,3 +154,34 @@ full interaction history.
 Archived tasks can be inspected with `agentproof history show TASK_ID` or resumed with
 `agentproof history resume TASK_ID`. Resuming copies the evidence into a new active task and
 leaves the original archive unchanged.
+
+## Report links and CI evidence (0.8.0)
+
+`files` must contain repository-relative paths. Reports group each acceptance scenario with
+its related checks, logs, reported JUnit failures and human questions. Changed files link to
+individual patches under `diffs/`; those patches remain available after archival. Paths are
+an explicit review mapping, not proof that a requirement is covered by the files.
+
+Confirmation requires every linked check to have current successful evidence and intact logs
+and structured results, when requested. Rejection can be recorded while evidence is missing.
+Items without linked checks remain manual-only decisions. Old decisions become stale when
+the workspace, configuration or linked execution changes. After deciding, run `agentproof report`
+to refresh the saved Markdown report; `status` always recomputes the current state.
+
+The repository's `agentproof-report.yml` workflow compares the checked-out PR merge result
+against the PR base commit. It uses `pull_request` with read-only repository permissions;
+forked contributions do not receive publishing credentials. The `agentproof-report` artifact
+contains `report.md`, `assessment.json`, `changes.patch`, related file diffs, logs and snapshots.
+Artifacts expire after seven days. Manual runs compare the current revision with `HEAD`.
+Both modes are explicitly after-the-fact baselines. CI evidence is never a human approval.
+
+## Recording outcomes
+
+```bash
+agentproof outcome --review-seconds 90 --found-issue --decision rejected --note "Missing timeout case"
+agentproof outcome --review-seconds 45 --no-issue --decision accepted
+```
+
+Omit both issue flags when the issue result has not been recorded. Durations must be finite
+and nonnegative. Record actual observations; do not estimate time savings from a single review.
+The outcome command records feedback and does not confirm acceptance items.

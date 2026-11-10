@@ -4,23 +4,17 @@ All notable changes to AgentProof are documented here.
 
 ## 0.8.0 — 2026-11-10
 
-- Add `outcome` to record review time, whether a missed issue was found, the human decision and a note.
-- Surface recorded outcomes in task reports and machine-readable status output for ongoing dogfood analysis.
+This release combines the previously unreleased 0.6.0 and 0.7.0 development changes.
 
-## 0.7.0 — 2026-11-10
-
-- Fold historical check executions into a collapsed human report section while retaining full JSON history.
-- Add `history show TASK_ID` and `history resume TASK_ID`; archives remain immutable when resumed.
-- Allow acceptance items to list related source and test files; surface them in reports.
-- Add a GitHub Actions workflow that uploads the report, logs and captured diff as an artifact.
-
-## 0.6.0 — 2026-11-10
-
-- Add explicit `confirm` and `reject` commands for human acceptance decisions.
-- Bind decisions to the captured workspace, acceptance configuration and linked check receipts.
-- Mark decisions as `STALE_CONFIRMATION` after file edits, log tampering, configuration changes or check reruns.
-- Preserve human notes and rejection reasons in JSON and Markdown reports.
-- Add `init --from-commit` for explicitly marked after-the-fact baselines.
+- Record human acceptance with `confirm` / `reject`; confirmation requires current successful linked evidence.
+- Invalidate decisions when files, configuration, check receipts, logs or JUnit results change.
+- Collapse historical checks while preserving every execution in JSON and archived evidence.
+- Capture explicitly marked after-the-fact baselines with `init --from-commit`.
+- Inspect and resume archived tasks without changing the archive; failed resumes clean up staged evidence.
+- Link acceptance scenarios to source/test files, individual diffs, logs, JUnit failures and human questions.
+- Generate pull request reports against the base commit in GitHub Actions; upload complete evidence artifacts.
+- Record review outcomes with optional duration, issue result and notes; unknown issue results remain distinct from no issue found.
+- Make CI tests independent of global Git identity and handle invalid configuration with actionable reports.
 
 ## 0.5.1 — 2026-11-10
 

@@ -166,3 +166,25 @@ MIT 开源协议。欢迎提交可复现问题、会话格式样例或带测试�
 
 会话导入识别 Claude 消息块与 Codex 的 `response_item.payload`、`compacted` 记录。
 Cline、Cursor 原生格式尚未验证；通用事件统计不等于完整支持。
+
+## 人工确认与历史恢复（0.8.0）
+
+配置 `acceptance` 后，每个验收项可填写 `files`、`checks` 和 `questions`。
+报告把文件差异、命令日志、失败用例和人工问题放在同一验收场景下。
+
+```bash
+agentproof confirm evidence-integrity --note "已核对当前代码和日志"
+agentproof reject review-actionability --reason "缺少超时场景"
+agentproof report
+agentproof history show TASK_ID
+agentproof history resume TASK_ID
+```
+
+关联检查缺失、失败或过期时不能确认。确认后代码、配置、日志、JUnit 文件或检查执行记录变化，
+旧决定显示 `STALE_CONFIRMATION`。恢复历史任务会创建活动副本，原归档不变。
+如果开始任务时没有记录基线，可用 `init --from-commit COMMIT --goal "..."`；
+报告会明确标为事后基线，不能据此证明 AI 修改前的完整状态和过程。
+
+审查后可用 `outcome --review-seconds 90 --no-issue --decision accepted --note "实际观察"`
+记录结果；尚未统计是否发现问题时省略 `--no-issue` 和 `--found-issue`。
+仓库的 GitHub Actions 会生成可下载的 `agentproof-report`，包含报告、差异和日志，保留七天。
