@@ -352,6 +352,17 @@ class WorkflowTest(unittest.TestCase):
         self.assertIn('NEEDS_HUMAN_REVIEW', evidence)
         self.assertEqual(content.count('Does retrying stop after a timeout?'), 1)
 
+    def test_plain_report_separates_implementer_claims_from_observed_evidence(self):
+        self.init()
+        claim = 'Implemented retry timeout handling'
+        self.assertEqual(self.cli('review', '--claim', claim)[0], 0)
+        overview = self.cli('status', '--brief')[1]
+        self.assertIn(claim, overview)
+        self.assertIn('statements to check against the evidence', overview)
+        self.assertIn('Observed changes in 0 captured files', overview)
+        data = json.loads(self.cli('status', '--json')[1])
+        self.assertEqual(data['review']['items'][0]['status'], 'UNVERIFIED')
+
     def test_chinese_report_language_persists_and_display_override_does_not_mutate(self):
         self.assertEqual(self.cli('init', '--goal', '修复重试', '--lang', 'zh-CN')[0], 0)
         self.assertIn('还没有记录检查结果', self.cli('status', '--brief')[1])

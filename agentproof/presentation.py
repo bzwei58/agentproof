@@ -7,6 +7,17 @@ def summary(data, language="en"):
 
     lines = [say("## 1. What changed", "## 1. 这次改了什么"), "",
              say(f"Task requested: {data['goal']}", f"这次要做的事：{data['goal']}")]
+    claims = (data.get("review") or {}).get("items", [])
+    if claims:
+        lines += ["", say("Implementer's handoff (statements to check against the evidence):",
+                           "实现者的交付说明（还需结合下面的证据核对）："), ""]
+        lines += [f"- {item['claim']}" for item in claims[:3]]
+        lines += [""]
+        if len(claims) > 3:
+            lines += [say("More statements are retained in the detailed evidence.", "其余说明保留在详细证据中。"), ""]
+    else:
+        lines += [say("No delivery description was supplied; file changes below do not explain the behavior. Ask the implementer for a short handoff if needed.",
+                      "实现者尚未提供交付说明；下方文件清单不能解释功能变化。需要时请让实现者补一句具体说明。"), ""]
     if data["workspace_error"]:
         lines += [say("File comparison could not be completed; the change scope is unknown.",
                       "文件比较没有完成，目前无法确定改动范围。")]
