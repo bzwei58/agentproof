@@ -1,0 +1,231 @@
+{
+  "case": {
+    "case_id": "K4",
+    "revision": "c2279458a5ba91ebc6c4eefd54c99e2c3d433021",
+    "label": "correct_for_scoped_contract",
+    "baseline_tests_revision": "12069c84ccbf44bcacc016a8d7ee971f70ba4967",
+    "packet_sha256": "4538785fdca48c8bef9bf1ab31652b59630abd440ae582c7bca7f48f3b5b4a67",
+    "production_sha256": {
+      "agentproof/__init__.py": "d2500e22d978b1530347f11c393085c3b18fd1c4290b3b1274f1f86237fa1d72",
+      "agentproof/cli.py": "d458b17ec97eb5d9a457b5fadcdd2fd7ddbe0ad2225bc4788505fd0f3e1233f0",
+      "agentproof/__main__.py": "935a1c1166b0c1ea35a82256345000bf2c73ded718d77773bc27a71ecce28f7d"
+    },
+    "contract_origin": "Retrospectively scoped from c227945 README restore guarantee; not a prospectively frozen original requirement."
+  },
+  "model_arms": {
+    "review": {
+      "json": {
+        "verdict": "no_issue_found",
+        "findings": [],
+        "question": null,
+        "limits": "Static reasoning only; no code was executed. Scope was limited to the restore requirement. Traced the restore path in agentproof/cli.py: (1) the first loop is read-only and completes full validation for every snapshot entry before any write — safe_path (absolute/..//.git/.agentproof and symlink-in-component rejection), snapshot copy read (missing copy raises OSError, caught in main for exit 2), sha256-vs-manifest corruption check, target-is-non-regular-file conflict, and non-directory ancestor conflict; (2) preview mode writes nothing; (3) with --apply, checkpoint() writes only under .agentproof (store, not project files), then a read-only backup-safety re-check refuses when an existing target was not captured in the backup (e.g., newly git-ignored file), and only then does the write loop run (mkdir(parents=True) recreates missing directories, write_bytes + chmod); (4) no code path in restore deletes files or issues any git command that mutates the index (git usage is read-only ls-files). Every ValueError/OSError refusal path raises before the write loop, so a refused restore leaves working-tree files unchanged; side effects of a late refusal are confined to the store (a backup snapshot entry in task.json), which I treated as non-project files since the store is git-excluded tool evidence. Per the requirement's own exclusion, mid-write failures (permissions, disk full) and concurrent edits causing partial restores were not treated as violations. One unverified edge, noted as speculation rather than a finding: a hand-tampered manifest with structurally malformed entries (e.g., missing 'sha256' key) would raise an uncaught KeyError traceback instead of a clean exit 2, but this still occurs before any project write, so the stated invariants hold; manifests produced by checkpoint() cannot contain such entries."
+      },
+      "receipt.json": {
+        "packet_sha256": "4538785fdca48c8bef9bf1ab31652b59630abd440ae582c7bca7f48f3b5b4a67",
+        "prompt_sha256": "50a017545facc5ad6690b39e7d12f9db408899df783101db4579aa638405dd44",
+        "seconds": 157.429,
+        "provider": "Claude CLI (tool-free print, configured default model)",
+        "model_usage": {
+          "glm-5.3[1m]": {
+            "inputTokens": 7965,
+            "outputTokens": 8572,
+            "cacheReadInputTokens": 0,
+            "cacheCreationInputTokens": 0,
+            "webSearchRequests": 0,
+            "costUSD": 0.254125,
+            "contextWindow": 1000000,
+            "maxOutputTokens": 32000,
+            "thinkingTokens": 0,
+            "cacheCreationEphemeral5mInputTokens": 0,
+            "cacheCreationEphemeral1hInputTokens": 0,
+            "canonicalModel": "glm-5.3[1m]",
+            "provider": "firstParty",
+            "costBasis": "unknown"
+          }
+        },
+        "usage": {
+          "input_tokens": 7965,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 0,
+          "output_tokens": 8572,
+          "output_tokens_details": {
+            "thinking_tokens": 0
+          },
+          "server_tool_use": {
+            "web_search_requests": 0,
+            "web_fetch_requests": 0
+          },
+          "service_tier": "standard",
+          "cache_creation": {
+            "ephemeral_1h_input_tokens": 0,
+            "ephemeral_5m_input_tokens": 0
+          },
+          "inference_geo": "",
+          "iterations": [],
+          "speed": "standard",
+          "fallback_credit": null
+        },
+        "reported_cost_usd": 0.254125,
+        "tools_available": false,
+        "history_supplied": false,
+        "trials": 1,
+        "same_base_packet_for_both_arms": true
+      },
+      "unavailable.json": {
+        "reason": "model inference timeout"
+      },
+      "attempts": [
+        {
+          "outcome": "timeout",
+          "timeout_seconds": 180,
+          "recorded_retrospectively": true,
+          "note": "Infrastructure timeout before a valid answer; no answer replaced."
+        },
+        {
+          "outcome": "response",
+          "exit_code": 0,
+          "seconds": 157.429,
+          "prompt_sha256": "50a017545facc5ad6690b39e7d12f9db408899df783101db4579aa638405dd44",
+          "recorded_retrospectively": true,
+          "source": "existing frozen review receipt"
+        }
+      ],
+      "status": "valid_response"
+    },
+    "probe": {
+      "json": {
+        "verdict": "tests_proposed",
+        "oracle_source": "When restoring a snapshot, validate snapshot content and filesystem path conflicts before changing any project file. A refused restore must leave project files unchanged. Missing directories may be recreated. Do not delete files created after the snapshot or modify the Git index. This concerns validation conflicts, not atomicity under arbitrary write failures or concurrent edits.",
+        "scenarios": [
+          "Directory conflict: a snapshot file's path is now occupied by a directory (with content inside); both preview and --apply restore must be refused (nonzero exit) and every other project file must stay byte-identical to its pre-restore state, including a file that was pending restoration.",
+          "Blocked parent: a snapshot file lives under src/ but src now exists as a regular file; restore --apply must be refused before any write, leaving the modified sibling file and the blocking file unchanged.",
+          "Corrupted snapshot content: the stored bytes of one snapshot file no longer match the manifest sha256 while another file is modified in the workspace and would be restored; restore --apply must be refused with no workspace file altered (validation of the whole snapshot precedes any write).",
+          "Symlink target: a snapshot file path is replaced by a symlink to another project file; restore must refuse, preserving the symlink and the linked file's content.",
+          "Missing directories recreated: deleting a snapshot directory tree and adding a post-snapshot file, then restore --apply succeeds, recreating the nested directory and file exactly while keeping the later file.",
+          "Git index untouched: with a staged file making the index non-trivial, both a refused restore (conflict) and a successful applied restore leave .git/index bytes and `git ls-files --stage` output identical."
+        ],
+        "test_code": "import shutil\nimport subprocess\nimport unittest\n\nfrom probe_support import ProbeCase\n\nSTORE = \".agentproof\"\n\n\nclass RestoreValidationTests(ProbeCase):\n    def snapshot_file(self, ident, name):\n        return self.root / STORE / \"snapshots\" / ident / \"files\" / name\n\n    def test_directory_conflict_refusal_leaves_all_project_files_unchanged(self):\n        ident = self.start({\"a.py\": \"one\\n\", \"b.py\": \"two\\n\"})\n        self.write(\"a.py\", \"edited\\n\")\n        (self.root / \"b.py\").unlink()\n        (self.root / \"b.py\").mkdir()\n        (self.root / \"b.py\" / \"keep.txt\").write_text(\"inner\\n\")\n        code, _ = self.cli(\"restore\", ident)\n        self.assertNotEqual(code, 0)\n        code, _ = self.cli(\"restore\", ident, \"--apply\")\n        self.assertNotEqual(code, 0)\n        self.assertEqual(self.read(\"a.py\"), \"edited\\n\")\n        self.assertEqual(self.read(\"b.py/keep.txt\"), \"inner\\n\")\n\n    def test_blocked_parent_path_refused_before_any_write(self):\n        ident = self.start({\"src/util.py\": \"helper\\n\", \"top.py\": \"top\\n\"})\n        self.write(\"top.py\", \"edited\\n\")\n        shutil.rmtree(self.root / \"src\")\n        self.write(\"src\", \"now a file\\n\")\n        code, _ = self.cli(\"restore\", ident, \"--apply\")\n        self.assertNotEqual(code, 0)\n        self.assertEqual(self.read(\"top.py\"), \"edited\\n\")\n        self.assertEqual(self.read(\"src\"), \"now a file\\n\")\n\n    def test_corrupted_snapshot_content_refused_before_any_write(self):\n        ident = self.start({\"a.py\": \"one\\n\", \"b.py\": \"two\\n\"})\n        self.write(\"a.py\", \"edited\\n\")\n        self.snapshot_file(ident, \"b.py\").write_text(\"tampered\\n\")\n        code, _ = self.cli(\"restore\", ident, \"--apply\")\n        self.assertNotEqual(code, 0)\n        self.assertEqual(self.read(\"a.py\"), \"edited\\n\")\n        self.assertEqual(self.read(\"b.py\"), \"two\\n\")\n\n    def test_symlink_target_refusal_preserves_symlink_and_victim(self):\n        ident = self.start({\"app.py\": \"v1\\n\", \"outside.txt\": \"safe\\n\"})\n        (self.root / \"app.py\").unlink()\n        (self.root / \"app.py\").symlink_to(self.root / \"outside.txt\")\n        code, _ = self.cli(\"restore\", ident, \"--apply\")\n        self.assertNotEqual(code, 0)\n        self.assertTrue((self.root / \"app.py\").is_symlink())\n        self.assertEqual(self.read(\"outside.txt\"), \"safe\\n\")\n\n    def test_missing_directories_recreated_and_later_files_kept(self):\n        ident = self.start({\"src/deep/util.py\": \"helper\\n\", \"root.txt\": \"r\\n\"})\n        shutil.rmtree(self.root / \"src\")\n        self.write(\"later.txt\", \"keep\\n\")\n        code, _ = self.cli(\"restore\", ident, \"--apply\")\n        self.assertEqual(code, 0)\n        self.assertEqual(self.read(\"src/deep/util.py\"), \"helper\\n\")\n        self.assertEqual(self.read(\"root.txt\"), \"r\\n\")\n        self.assertEqual(self.read(\"later.txt\"), \"keep\\n\")\n\n    def test_git_index_unchanged_by_refused_and_applied_restore(self):\n        self.write(\"tracked.txt\", \"base\\n\")\n        # git plumbing only: list argv, no shell.\n        subprocess.run([\"git\", \"-C\", str(self.root), \"add\", \"tracked.txt\"], check=True)\n        ident = self.start({\"tracked.txt\": \"base\\n\", \"a.py\": \"one\\n\"})\n        index_before = (self.root / \".git\" / \"index\").read_bytes()\n        staged_before = subprocess.check_output(\n            [\"git\", \"-C\", str(self.root), \"ls-files\", \"--stage\"])\n        (self.root / \"a.py\").unlink()\n        (self.root / \"a.py\").mkdir()\n        (self.root / \"a.py\" / \"x.txt\").write_text(\"x\\n\")\n        code, _ = self.cli(\"restore\", ident, \"--apply\")\n        self.assertNotEqual(code, 0)\n        self.assertEqual((self.root / \".git\" / \"index\").read_bytes(), index_before)\n        shutil.rmtree(self.root / \"a.py\")\n        self.write(\"a.py\", \"edited\\n\")\n        code, _ = self.cli(\"restore\", ident, \"--apply\")\n        self.assertEqual(code, 0)\n        self.assertEqual(self.read(\"a.py\"), \"one\\n\")\n        self.assertEqual((self.root / \".git\" / \"index\").read_bytes(), index_before)\n        self.assertEqual(subprocess.check_output(\n            [\"git\", \"-C\", str(self.root), \"ls-files\", \"--stage\"]), staged_before)\n",
+        "question": null,
+        "limits": "Exit-code values and refusal message wording are not specified by the requirement, so refusals assert only a nonzero exit plus byte-identical project files; success is asserted as exit 0 only where the restore is expected to apply. Conflicts are constructed only via directories, blocking regular files, symlinks, and sha-mismatched snapshot bytes; per the stated scope, no test covers crash-mid-write atomicity, arbitrary write failures, or concurrent edits. The Git-index oracle compares .git/index bytes and `git ls-files --stage` output (an identical rewrite would pass trivially, which is still the observable notion of 'unmodified'). Tests assume start() returns the baseline checkpoint id and that start()/write() create parent directories for nested relative paths; subprocess is used only for local git plumbing with list argv, never a shell. Whether a hand-tampered manifest could create mutually conflicting snapshot paths is untestable here because the snapshot store itself cannot physically hold both a file and a file beneath it, so that vector is not exercised."
+      },
+      "receipt.json": {
+        "packet_sha256": "4538785fdca48c8bef9bf1ab31652b59630abd440ae582c7bca7f48f3b5b4a67",
+        "prompt_sha256": "95171e36d198d793dde3f16ff9f4515a974ba4a8da21eb4798aa431c63a6d746",
+        "seconds": 168.795,
+        "provider": "Claude CLI (tool-free print, configured default model)",
+        "model_usage": {
+          "glm-5.3[1m]": {
+            "inputTokens": 8156,
+            "outputTokens": 10502,
+            "cacheReadInputTokens": 0,
+            "cacheCreationInputTokens": 0,
+            "webSearchRequests": 0,
+            "costUSD": 0.30333,
+            "contextWindow": 1000000,
+            "maxOutputTokens": 32000,
+            "thinkingTokens": 0,
+            "cacheCreationEphemeral5mInputTokens": 0,
+            "cacheCreationEphemeral1hInputTokens": 0,
+            "canonicalModel": "glm-5.3[1m]",
+            "provider": "firstParty",
+            "costBasis": "unknown"
+          }
+        },
+        "usage": {
+          "input_tokens": 8156,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 0,
+          "output_tokens": 10502,
+          "output_tokens_details": {
+            "thinking_tokens": 0
+          },
+          "server_tool_use": {
+            "web_search_requests": 0,
+            "web_fetch_requests": 0
+          },
+          "service_tier": "standard",
+          "cache_creation": {
+            "ephemeral_1h_input_tokens": 0,
+            "ephemeral_5m_input_tokens": 0
+          },
+          "inference_geo": "",
+          "iterations": [],
+          "speed": "standard",
+          "fallback_credit": null
+        },
+        "reported_cost_usd": 0.30333,
+        "tools_available": false,
+        "history_supplied": false,
+        "trials": 1,
+        "same_base_packet_for_both_arms": true
+      },
+      "unavailable.json": {
+        "reason": "model inference timeout",
+        "note": "Retained infrastructure failure; any successful retry uses the identical packet."
+      },
+      "attempts": [
+        {
+          "outcome": "timeout",
+          "timeout_seconds": 180,
+          "recorded_retrospectively": true,
+          "note": "Infrastructure timeout before a valid answer; no answer replaced."
+        },
+        {
+          "outcome": "timeout",
+          "timeout_seconds": 360,
+          "prompt_sha256": "95171e36d198d793dde3f16ff9f4515a974ba4a8da21eb4798aa431c63a6d746"
+        },
+        {
+          "outcome": "response",
+          "exit_code": 0,
+          "seconds": 168.794,
+          "prompt_sha256": "95171e36d198d793dde3f16ff9f4515a974ba4a8da21eb4798aa431c63a6d746"
+        }
+      ],
+      "status": "valid_response"
+    }
+  },
+  "baseline.receipt.json": {
+    "exit_code": 0,
+    "seconds": 3.913,
+    "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderr_sha256": "a75ee566a0e6f43db5cc4f718eb3f0f3003e742b7444a1f2e3c1ea9d482e11a9"
+  },
+  "known-replay.json": {
+    "exit_code": 2,
+    "before": {
+      "a.txt": "important later edits",
+      "z-folder": "blocking file"
+    },
+    "after": {
+      "a.txt": "important later edits",
+      "z-folder": "blocking file"
+    },
+    "workspace_unchanged": true,
+    "stdout": "agentproof: Restore path blocked by non-directory: z-folder\n",
+    "scope": "known-answer historical replay, not model-discovered evidence"
+  },
+  "probe_execution.receipt.json": {
+    "exit_code": 0,
+    "seconds": 0.894,
+    "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderr_sha256": "cf4ac5eefd3eec030bba6f21920a45a804620be3c44b30af74dc3e4c7974b584",
+    "generated_source_sha256": "8f4ece123536043b0d266ca00c02bb515f9696a3248efec959e28ab47259f9c4",
+    "source_case": "K4",
+    "target_case": "K4"
+  },
+  "baseline.stderr.txt": "test_baseline_preserves_initial_uncommitted_edits (test_cli.CLITest.test_baseline_preserves_initial_uncommitted_edits) ... ok\ntest_check_that_changes_code_is_not_fresh (test_cli.CLITest.test_check_that_changes_code_is_not_fresh) ... ok\ntest_evidence_is_git_ignored (test_cli.CLITest.test_evidence_is_git_ignored) ... ok\ntest_failed_command_shows_bounded_tail_and_retains_full_log (test_cli.CLITest.test_failed_command_shows_bounded_tail_and_retains_full_log) ... ok\ntest_import_partial_jsonl_without_storing_messages (test_cli.CLITest.test_import_partial_jsonl_without_storing_messages) ... ok\ntest_lock_and_unknown_checkpoint (test_cli.CLITest.test_lock_and_unknown_checkpoint) ... ok\ntest_missing_executable_error_is_visible (test_cli.CLITest.test_missing_executable_error_is_visible) ... ok\ntest_pass_failure_and_stale_evidence (test_cli.CLITest.test_pass_failure_and_stale_evidence) ... ok\ntest_path_traversal_rejected (test_cli.CLITest.test_path_traversal_rejected) ... ok\ntest_report_compacts_multiline_commands_without_losing_evidence (test_cli.CLITest.test_report_compacts_multiline_commands_without_losing_evidence) ... ok\ntest_report_generation_and_no_checks_claim (test_cli.CLITest.test_report_generation_and_no_checks_claim) ... ok\ntest_restore_deleted_file (test_cli.CLITest.test_restore_deleted_file) ... ok\ntest_restore_preview_and_backup_preserve_index_and_extra_files (test_cli.CLITest.test_restore_preview_and_backup_preserve_index_and_extra_files) ... ok\ntest_restore_refuses_to_overwrite_file_not_in_backup_scope (test_cli.CLITest.test_restore_refuses_to_overwrite_file_not_in_backup_scope) ... ok\ntest_restore_rejects_symlink_and_corrupted_snapshot (test_cli.CLITest.test_restore_rejects_symlink_and_corrupted_snapshot) ... ok\ntest_sensitive_ignored_and_symlink_files_excluded (test_cli.CLITest.test_sensitive_ignored_and_symlink_files_excluded) ... ok\ntest_successful_command_stays_quiet (test_cli.CLITest.test_successful_command_stays_quiet) ... ok\ntest_timeout_and_missing_executable_recorded (test_cli.CLITest.test_timeout_and_missing_executable_recorded) ... ok\ntest_timeout_is_explained_in_terminal (test_cli.CLITest.test_timeout_is_explained_in_terminal) ... ok\n\n----------------------------------------------------------------------\nRan 19 tests in 3.826s\n\nOK\n",
+  "probe_execution.stderr.txt": "test_blocked_parent_path_refused_before_any_write (generated_probe.RestoreValidationTests.test_blocked_parent_path_refused_before_any_write) ... ok\ntest_corrupted_snapshot_content_refused_before_any_write (generated_probe.RestoreValidationTests.test_corrupted_snapshot_content_refused_before_any_write) ... ok\ntest_directory_conflict_refusal_leaves_all_project_files_unchanged (generated_probe.RestoreValidationTests.test_directory_conflict_refusal_leaves_all_project_files_unchanged) ... ok\ntest_git_index_unchanged_by_refused_and_applied_restore (generated_probe.RestoreValidationTests.test_git_index_unchanged_by_refused_and_applied_restore) ... ok\ntest_missing_directories_recreated_and_later_files_kept (generated_probe.RestoreValidationTests.test_missing_directories_recreated_and_later_files_kept) ... ok\ntest_symlink_target_refusal_preserves_symlink_and_victim (generated_probe.RestoreValidationTests.test_symlink_target_refusal_preserves_symlink_and_victim) ... ok\n\n----------------------------------------------------------------------\nRan 6 tests in 0.829s\n\nOK\n",
+  "cross_on_R2.receipt.json": {
+    "exit_code": 0,
+    "seconds": 0.911,
+    "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderr_sha256": "e661064cd4d8953e5aa72fc44286aad625d78f2a762f45d116621cfadeb67409",
+    "generated_source_sha256": "8f4ece123536043b0d266ca00c02bb515f9696a3248efec959e28ab47259f9c4",
+    "source_case": "K4",
+    "target_case": "R2"
+  },
+  "cross_on_R2.stderr.txt": "test_blocked_parent_path_refused_before_any_write (generated_probe.RestoreValidationTests.test_blocked_parent_path_refused_before_any_write) ... ok\ntest_corrupted_snapshot_content_refused_before_any_write (generated_probe.RestoreValidationTests.test_corrupted_snapshot_content_refused_before_any_write) ... ok\ntest_directory_conflict_refusal_leaves_all_project_files_unchanged (generated_probe.RestoreValidationTests.test_directory_conflict_refusal_leaves_all_project_files_unchanged) ... ok\ntest_git_index_unchanged_by_refused_and_applied_restore (generated_probe.RestoreValidationTests.test_git_index_unchanged_by_refused_and_applied_restore) ... ok\ntest_missing_directories_recreated_and_later_files_kept (generated_probe.RestoreValidationTests.test_missing_directories_recreated_and_later_files_kept) ... ok\ntest_symlink_target_refusal_preserves_symlink_and_victim (generated_probe.RestoreValidationTests.test_symlink_target_refusal_preserves_symlink_and_victim) ... ok\n\n----------------------------------------------------------------------\nRan 6 tests in 0.852s\n\nOK\n",
+  "export_note": "Local evidence-root paths in test logs are redacted; receipt hashes identify original local logs.",
+  "generated_probe_sha256": "8f4ece123536043b0d266ca00c02bb515f9696a3248efec959e28ab47259f9c4"
+}

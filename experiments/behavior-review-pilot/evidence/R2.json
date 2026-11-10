@@ -1,0 +1,211 @@
+{
+  "case": {
+    "case_id": "R2",
+    "revision": "12069c84ccbf44bcacc016a8d7ee971f70ba4967",
+    "label": "historical_defect",
+    "baseline_tests_revision": "12069c84ccbf44bcacc016a8d7ee971f70ba4967",
+    "packet_sha256": "d78abd4760af508a374dc4ec3a0efa6b6b58dd153964a518853a826a52cc69c2",
+    "production_sha256": {
+      "agentproof/__init__.py": "d2500e22d978b1530347f11c393085c3b18fd1c4290b3b1274f1f86237fa1d72",
+      "agentproof/cli.py": "b35abae7067b6e444876643f1b088807a6bfe9b5752f725b94d64c2092b15708",
+      "agentproof/__main__.py": "935a1c1166b0c1ea35a82256345000bf2c73ded718d77773bc27a71ecce28f7d"
+    },
+    "contract_origin": "Retrospectively scoped from c227945 README restore guarantee; not a prospectively frozen original requirement."
+  },
+  "model_arms": {
+    "review": {
+      "receipt.json": {
+        "packet_sha256": "d78abd4760af508a374dc4ec3a0efa6b6b58dd153964a518853a826a52cc69c2",
+        "prompt_sha256": "942eaa41540ccde5ea94af8fd8faf935d31fba3cd383807cae6032bc27e3480b",
+        "seconds": 123.071,
+        "model_usage": {
+          "glm-5.3[1m]": {
+            "inputTokens": 7913,
+            "outputTokens": 5619,
+            "cacheReadInputTokens": 0,
+            "cacheCreationInputTokens": 0,
+            "webSearchRequests": 0,
+            "costUSD": 0.18003999999999998,
+            "contextWindow": 1000000,
+            "maxOutputTokens": 32000,
+            "thinkingTokens": 0,
+            "cacheCreationEphemeral5mInputTokens": 0,
+            "cacheCreationEphemeral1hInputTokens": 0,
+            "canonicalModel": "glm-5.3[1m]",
+            "provider": "firstParty",
+            "costBasis": "unknown"
+          }
+        },
+        "usage": {
+          "input_tokens": 7913,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 0,
+          "output_tokens": 5619,
+          "output_tokens_details": {
+            "thinking_tokens": 0
+          },
+          "server_tool_use": {
+            "web_search_requests": 0,
+            "web_fetch_requests": 0
+          },
+          "service_tier": "standard",
+          "cache_creation": {
+            "ephemeral_1h_input_tokens": 0,
+            "ephemeral_5m_input_tokens": 0
+          },
+          "inference_geo": "",
+          "iterations": [],
+          "speed": "standard",
+          "fallback_credit": null
+        },
+        "reported_cost_usd": 0.18003999999999998,
+        "tools_available": false,
+        "history_supplied": false,
+        "trials": 1,
+        "same_base_packet_for_both_arms": true,
+        "receipt_recovered_from_frozen_raw_response": true
+      },
+      "invalid.json": {
+        "reason": "invalid response JSON: missing closing object brace in findings array",
+        "original_answer": "{\"verdict\":\"issue_found\",\"findings\":[{\"title\":\"Filesystem conflict where a snapshot path's ancestor is currently a regular file is not validated pre-write, so a refused restore can modify project files\",\"source\":\"agentproof/cli.py, restore branch: validation loop only checks `if target.exists() and not target.is_file()` for the target itself; write loop does `target.parent.mkdir(parents=True, exist_ok=True)` then `target.write_bytes(data)` per pending file with no ancestor-conflict precheck\",\"expected\":\"All filesystem path conflicts must be detected before any project file is changed, and a refused restore must leave project files unchanged. A snapshot entry like `sub/b.txt` whose required parent `sub` currently exists as a regular file is a deterministic path conflict that is checkable pre-write (each ancestor of the target must be missing or a directory), so it must cause refusal before the write loop starts.\",\"trigger\":\"1) Repo with tracked files `a.txt` (content 'one') and `sub/b.txt`; run `agentproof init` (snapshot S). 2) Edit `a.txt` to 'two'; delete directory `sub` and create a regular file named `sub`. 3) Run `agentproof restore S --apply`. In the validation loop, `Path('sub/b.txt').exists()` is False (ENOTDIR), so no conflict is recorded and both `a.txt` and `sub/b.txt` enter `pending`; the preview even prints both. In the write loop (snapshot order is sorted), `a.txt` is written first, then `sub/b.txt` fails because `mkdir(parents=True, exist_ok=True)` on `sub` raises FileExistsError/NotADirectoryError when `sub` is an existing non-directory (CPython re-raises since `self.is_dir()` is False despite exist_ok=True).\",\"actual_prediction\":\"The OSError propagates to main(), which prints 'agentproof: ...' and exits 2 — i.e., the restore is refused — yet `a.txt` has already been overwritten with the snapshot content 'one', discarding the user's 'two'. Only the order of sorted names determines whether earlier files were already written; nothing rolls them back. Existing tests cover directory-at-target, symlink-at-target, corrupted snapshot content, and out-of-backup-scope refusals, but not the ancestor-is-a-file case.\",\"impact\":\"Violates the stated requirement twice: a filesystem path conflict is not validated before changing project files, and a refused restore (exit 2) leaves project files changed. User edits made after the snapshot are silently lost even though the command reports failure (recoverable only by manually noticing the 'before restore' backup checkpoint). Note this is a deterministic validation conflict, not an arbitrary write failure or concurrent edit, so it is inside the declared scope.\"],\"question\":null,\"limits\":\"Static review only; no code was executed. The mkdir behavior on an existing regular file is inferred from CPython pathlib semantics (exist_ok does not suppress the error when the path is not a directory). Out-of-scope by the task statement and not flagged: partial writes caused by I/O errors, permissions, or concurrent edits; tampered manifests with missing keys (e.g., no 'mode') raise uncaught KeyError rather than a graceful error, though no project files change in that case.\"}",
+        "note": "Preserved verbatim. Static prose predicts the known defect, but schema validation failed. No repair or resampling."
+      },
+      "unavailable.json": {
+        "reason": "model inference timeout",
+        "note": "Retained infrastructure failure; any successful retry uses the identical packet."
+      },
+      "attempts": [
+        {
+          "outcome": "timeout",
+          "timeout_seconds": 360,
+          "prompt_sha256": "942eaa41540ccde5ea94af8fd8faf935d31fba3cd383807cae6032bc27e3480b"
+        },
+        {
+          "outcome": "response",
+          "exit_code": 0,
+          "seconds": 123.071,
+          "prompt_sha256": "942eaa41540ccde5ea94af8fd8faf935d31fba3cd383807cae6032bc27e3480b"
+        }
+      ],
+      "status": "invalid_response"
+    },
+    "probe": {
+      "json": {
+        "verdict": "tests_proposed",
+        "oracle_source": "When restoring a snapshot, validate snapshot content and filesystem path conflicts before changing any project file. A refused restore must leave project files unchanged. Missing directories may be recreated. Do not delete files created after the snapshot or modify the Git index.",
+        "scenarios": [
+          "Snapshot content corruption: corrupt one snapshot file's stored content while another tracked file ('a.py', sorted before it) has local edits needing restoration; restore --apply must refuse (nonzero exit) and leave every project file byte-identical to pre-restore state, proving all content validation happens before any write.",
+          "Filesystem path conflict via parent path: snapshot contains 'd/b.py'; user later replaced directory 'd' with a regular file containing post-snapshot user data. Restore must refuse (it cannot delete that file) and must not have already restored 'a.py', which sorts before 'd/b.py' and would otherwise be written first.",
+          "Filesystem path conflict via directory occupying a file path: snapshot file 'b.py' now exists as a directory with user content inside; restore must refuse before writing the otherwise-restorable 'a.py'.",
+          "Missing directories may be recreated: delete 'src/' entirely after the snapshot; restore --apply must succeed and recreate 'src/app.py' with original content.",
+          "Post-snapshot files retained and Git index untouched on a successful restore: 'new.py' created after the snapshot survives, 'a.py' is restored, and .git/index bytes (or its continued absence, since no shell/git is allowed here) are identical before and after.",
+          "Corruption-refusal must also leave the corrupted entry's on-disk counterpart unchanged ('b.py' keeps its current content), not partially rewritten."
+        ],
+        "test_code": "import shutil\nimport unittest\n\nfrom probe_support import ProbeCase\n\n\nclass RestoreValidationTests(ProbeCase):\n    def _tamper_stored_bytes(self, old, new):\n        replaced = False\n        for path in sorted((self.root / \".agentproof\").rglob(\"*\")):\n            if path.is_file() and path.read_bytes() == old:\n                path.write_bytes(new)\n                replaced = True\n        return replaced\n\n    def test_corrupt_snapshot_refusal_leaves_all_project_files_unchanged(self):\n        cid = self.start({\"a.py\": \"A original\", \"b.py\": \"B original\"})\n        self.write(\"a.py\", \"A changed\")\n        self.assertTrue(\n            self._tamper_stored_bytes(b\"B original\", b\"B tampered\"),\n            \"precondition: snapshot blob for b.py located and corrupted\")\n        code, _ = self.cli(\"restore\", cid, \"--apply\")\n        self.assertNotEqual(code, 0)\n        self.assertEqual(self.read(\"a.py\"), \"A changed\")\n        self.assertEqual(self.read(\"b.py\"), \"B original\")\n\n    def test_parent_path_replaced_by_file_refusal_changes_nothing(self):\n        (self.root / \"d\").mkdir()\n        cid = self.start({\"a.py\": \"A original\", \"d/b.py\": \"B original\"})\n        self.write(\"a.py\", \"A changed\")\n        shutil.rmtree(self.root / \"d\")\n        (self.root / \"d\").write_text(\"user data replacing the directory\")\n        code, _ = self.cli(\"restore\", cid, \"--apply\")\n        self.assertNotEqual(code, 0)\n        self.assertEqual(self.read(\"a.py\"), \"A changed\")\n        self.assertTrue((self.root / \"d\").is_file())\n        self.assertEqual((self.root / \"d\").read_text(),\n                         \"user data replacing the directory\")\n\n    def test_directory_where_snapshot_file_expected_refusal_changes_nothing(self):\n        cid = self.start({\"a.py\": \"A original\", \"b.py\": \"B original\"})\n        self.write(\"a.py\", \"A changed\")\n        (self.root / \"b.py\").unlink()\n        (self.root / \"b.py\").mkdir()\n        (self.root / \"b.py\" / \"nested.txt\").write_text(\"inside\")\n        code, _ = self.cli(\"restore\", cid, \"--apply\")\n        self.assertNotEqual(code, 0)\n        self.assertEqual(self.read(\"a.py\"), \"A changed\")\n        self.assertTrue((self.root / \"b.py\" / \"nested.txt\").exists())\n        self.assertEqual((self.root / \"b.py\" / \"nested.txt\").read_text(), \"inside\")\n\n    def test_missing_directory_is_recreated(self):\n        (self.root / \"src\").mkdir()\n        cid = self.start({\"src/app.py\": \"app original\"})\n        shutil.rmtree(self.root / \"src\")\n        code, _ = self.cli(\"restore\", cid, \"--apply\")\n        self.assertEqual(code, 0)\n        self.assertEqual(self.read(\"src/app.py\"), \"app original\")\n\n    def test_post_snapshot_files_kept_and_git_index_untouched(self):\n        cid = self.start({\"a.py\": \"A original\"})\n        self.write(\"a.py\", \"A changed\")\n        self.write(\"new.py\", \"keep me\")\n        index = self.root / \".git\" / \"index\"\n        before = index.read_bytes() if index.exists() else None\n        code, _ = self.cli(\"restore\", cid, \"--apply\")\n        self.assertEqual(code, 0)\n        self.assertEqual(self.read(\"a.py\"), \"A original\")\n        self.assertEqual(self.read(\"new.py\"), \"keep me\")\n        after = index.read_bytes() if index.exists() else None\n        self.assertEqual(after, before)\n",
+        "question": null,
+        "limits": "Tests are black-box CLI probes; they assume the adapter's start() snapshots exactly the supplied files and that snapshot content is stored as raw bytes under .agentproof (corruption is injected by byte-matching, so a compressed/encoded store would fail the precondition rather than misreport). The Git-index check compares .git/index bytes (or continued absence) because shell/git subprocesses are disallowed; it cannot detect index changes if the file never exists. Out of scope per the requirement: atomicity under arbitrary mid-write failures (disk full, permission errors), concurrent edits, and whether a refusal may still append metadata under .agentproof. Preview-mode (no --apply) refusal semantics and file mode restoration are not asserted since the requirement does not state them."
+      },
+      "receipt.json": {
+        "packet_sha256": "d78abd4760af508a374dc4ec3a0efa6b6b58dd153964a518853a826a52cc69c2",
+        "prompt_sha256": "923e5a93ed4024c21ad04590122d8906a4a20a81339af5b6fecfe562253c108c",
+        "seconds": 430.964,
+        "provider": "Claude CLI (tool-free print, configured default model)",
+        "model_usage": {
+          "glm-5.3[1m]": {
+            "inputTokens": 8104,
+            "outputTokens": 9855,
+            "cacheReadInputTokens": 0,
+            "cacheCreationInputTokens": 0,
+            "webSearchRequests": 0,
+            "costUSD": 0.286895,
+            "contextWindow": 1000000,
+            "maxOutputTokens": 32000,
+            "thinkingTokens": 0,
+            "cacheCreationEphemeral5mInputTokens": 0,
+            "cacheCreationEphemeral1hInputTokens": 0,
+            "canonicalModel": "glm-5.3[1m]",
+            "provider": "firstParty",
+            "costBasis": "unknown"
+          }
+        },
+        "usage": {
+          "input_tokens": 8104,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 0,
+          "output_tokens": 9855,
+          "output_tokens_details": {
+            "thinking_tokens": 0
+          },
+          "server_tool_use": {
+            "web_search_requests": 0,
+            "web_fetch_requests": 0
+          },
+          "service_tier": "standard",
+          "cache_creation": {
+            "ephemeral_1h_input_tokens": 0,
+            "ephemeral_5m_input_tokens": 0
+          },
+          "inference_geo": "",
+          "iterations": [],
+          "speed": "standard",
+          "fallback_credit": null
+        },
+        "reported_cost_usd": 0.286895,
+        "tools_available": false,
+        "history_supplied": false,
+        "trials": 1,
+        "same_base_packet_for_both_arms": true
+      },
+      "attempts": [
+        {
+          "outcome": "response",
+          "exit_code": 0,
+          "seconds": 430.963,
+          "prompt_sha256": "923e5a93ed4024c21ad04590122d8906a4a20a81339af5b6fecfe562253c108c"
+        }
+      ],
+      "status": "valid_response"
+    }
+  },
+  "baseline.receipt.json": {
+    "exit_code": 0,
+    "seconds": 5.553,
+    "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderr_sha256": "2e42b26a244f133a0026f2a96b781dd9f1685731d6a58d5583df6db081d6f59f"
+  },
+  "known-replay.json": {
+    "exit_code": 2,
+    "before": {
+      "a.txt": "important later edits",
+      "z-folder": "blocking file"
+    },
+    "after": {
+      "a.txt": "snapshot version",
+      "z-folder": "blocking file"
+    },
+    "workspace_unchanged": false,
+    "stdout": "Restore 2 files from 38ab2b7c7c9e. Files created later remain; Git index stays unchanged.\n  a.txt\n  z-folder/worker.py\nagentproof: [Errno 17] File exists: '/private/var/folders/jg/k5y8fgnx5t5fp6f19rn99xn00000gn/T/agentproof-known-replay-c0k8gz7x/z-folder'\n",
+    "scope": "known-answer historical replay, not model-discovered evidence"
+  },
+  "probe_execution.receipt.json": {
+    "exit_code": 1,
+    "seconds": 0.668,
+    "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderr_sha256": "bc138ba0816806452256082b153444a58ee3015d15241b4b5664227bde3368e0",
+    "generated_source_sha256": "751d2547608604f3fd736732cadc8ddf68c66060c51e0d948b82c743f4a49c94"
+  },
+  "baseline.stderr.txt": "test_baseline_preserves_initial_uncommitted_edits (test_cli.CLITest.test_baseline_preserves_initial_uncommitted_edits) ... ok\ntest_check_that_changes_code_is_not_fresh (test_cli.CLITest.test_check_that_changes_code_is_not_fresh) ... ok\ntest_evidence_is_git_ignored (test_cli.CLITest.test_evidence_is_git_ignored) ... ok\ntest_failed_command_shows_bounded_tail_and_retains_full_log (test_cli.CLITest.test_failed_command_shows_bounded_tail_and_retains_full_log) ... ok\ntest_import_partial_jsonl_without_storing_messages (test_cli.CLITest.test_import_partial_jsonl_without_storing_messages) ... ok\ntest_lock_and_unknown_checkpoint (test_cli.CLITest.test_lock_and_unknown_checkpoint) ... ok\ntest_missing_executable_error_is_visible (test_cli.CLITest.test_missing_executable_error_is_visible) ... ok\ntest_pass_failure_and_stale_evidence (test_cli.CLITest.test_pass_failure_and_stale_evidence) ... ok\ntest_path_traversal_rejected (test_cli.CLITest.test_path_traversal_rejected) ... ok\ntest_report_compacts_multiline_commands_without_losing_evidence (test_cli.CLITest.test_report_compacts_multiline_commands_without_losing_evidence) ... ok\ntest_report_generation_and_no_checks_claim (test_cli.CLITest.test_report_generation_and_no_checks_claim) ... ok\ntest_restore_deleted_file (test_cli.CLITest.test_restore_deleted_file) ... ok\ntest_restore_preview_and_backup_preserve_index_and_extra_files (test_cli.CLITest.test_restore_preview_and_backup_preserve_index_and_extra_files) ... ok\ntest_restore_refuses_to_overwrite_file_not_in_backup_scope (test_cli.CLITest.test_restore_refuses_to_overwrite_file_not_in_backup_scope) ... ok\ntest_restore_rejects_symlink_and_corrupted_snapshot (test_cli.CLITest.test_restore_rejects_symlink_and_corrupted_snapshot) ... ok\ntest_sensitive_ignored_and_symlink_files_excluded (test_cli.CLITest.test_sensitive_ignored_and_symlink_files_excluded) ... ok\ntest_successful_command_stays_quiet (test_cli.CLITest.test_successful_command_stays_quiet) ... ok\ntest_timeout_and_missing_executable_recorded (test_cli.CLITest.test_timeout_and_missing_executable_recorded) ... ok\ntest_timeout_is_explained_in_terminal (test_cli.CLITest.test_timeout_is_explained_in_terminal) ... ok\n\n----------------------------------------------------------------------\nRan 19 tests in 5.468s\n\nOK\n",
+  "probe_execution.stderr.txt": "test_corrupt_snapshot_refusal_leaves_all_project_files_unchanged (generated_probe.RestoreValidationTests.test_corrupt_snapshot_refusal_leaves_all_project_files_unchanged) ... ok\ntest_directory_where_snapshot_file_expected_refusal_changes_nothing (generated_probe.RestoreValidationTests.test_directory_where_snapshot_file_expected_refusal_changes_nothing) ... ok\ntest_missing_directory_is_recreated (generated_probe.RestoreValidationTests.test_missing_directory_is_recreated) ... ok\ntest_parent_path_replaced_by_file_refusal_changes_nothing (generated_probe.RestoreValidationTests.test_parent_path_replaced_by_file_refusal_changes_nothing) ... FAIL\ntest_post_snapshot_files_kept_and_git_index_untouched (generated_probe.RestoreValidationTests.test_post_snapshot_files_kept_and_git_index_untouched) ... ok\n\n======================================================================\nFAIL: test_parent_path_replaced_by_file_refusal_changes_nothing (generated_probe.RestoreValidationTests.test_parent_path_replaced_by_file_refusal_changes_nothing)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"<evidence-root>/R2/generated_probe.py\", line 35, in test_parent_path_replaced_by_file_refusal_changes_nothing\n    self.assertEqual(self.read(\"a.py\"), \"A changed\")\nAssertionError: 'A original' != 'A changed'\n- A original\n+ A changed\n\n\n----------------------------------------------------------------------\nRan 5 tests in 0.598s\n\nFAILED (failures=1)\n",
+  "cross_on_K4.receipt.json": {
+    "exit_code": 0,
+    "seconds": 0.632,
+    "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderr_sha256": "1e3e1e65bcf9c0acbd8843cc94c5f15634b11a8ebdbf45c279e0314d5a40466d",
+    "source_case": "R2",
+    "target_case": "K4",
+    "generated_source_sha256": "751d2547608604f3fd736732cadc8ddf68c66060c51e0d948b82c743f4a49c94"
+  },
+  "cross_on_K4.stderr.txt": "test_corrupt_snapshot_refusal_leaves_all_project_files_unchanged (probe.RestoreValidationTests.test_corrupt_snapshot_refusal_leaves_all_project_files_unchanged) ... ok\ntest_directory_where_snapshot_file_expected_refusal_changes_nothing (probe.RestoreValidationTests.test_directory_where_snapshot_file_expected_refusal_changes_nothing) ... ok\ntest_missing_directory_is_recreated (probe.RestoreValidationTests.test_missing_directory_is_recreated) ... ok\ntest_parent_path_replaced_by_file_refusal_changes_nothing (probe.RestoreValidationTests.test_parent_path_replaced_by_file_refusal_changes_nothing) ... ok\ntest_post_snapshot_files_kept_and_git_index_untouched (probe.RestoreValidationTests.test_post_snapshot_files_kept_and_git_index_untouched) ... ok\n\n----------------------------------------------------------------------\nRan 5 tests in 0.569s\n\nOK\n",
+  "export_note": "Local evidence-root paths in test logs are redacted; receipt hashes identify original local logs.",
+  "generated_probe_sha256": "751d2547608604f3fd736732cadc8ddf68c66060c51e0d948b82c743f4a49c94"
+}
