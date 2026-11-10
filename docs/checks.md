@@ -86,3 +86,37 @@ Reports remain available and explain why the baseline comparison could not be ge
 An unfinished receipt with no exit code is `UNKNOWN`, never a passing execution.
 On Windows, timeout handling requests tree termination with taskkill; failures are retained
 as diagnostics. Escaped or detached processes are outside that guarantee.
+
+## Acceptance items (0.5.1+)
+
+Use optional `acceptance` entries to connect a requirement to named checks and the
+questions a person must answer. This makes evidence gaps actionable without claiming that
+the tool understands business correctness.
+
+```json
+{
+  "version": 1,
+  "checks": [
+    {"name": "payment-tests", "kind": "test",
+     "command": ["python", "-m", "pytest", "tests/payment", "--junitxml={junit}"],
+     "result_format": "junit"}
+  ],
+  "acceptance": [
+    {
+      "id": "timeout-no-double-charge",
+      "description": "A client timeout does not charge the customer twice",
+      "checks": ["payment-tests"],
+      "questions": [
+        "Does the test cover server-side success followed by a lost client response?",
+        "Does the assertion check the number of charges, not only the response code?"
+      ]
+    }
+  ]
+}
+```
+
+Each acceptance `id` is unique. Every referenced check must exist. An item with no usable
+linked evidence is `MISSING_EVIDENCE`; an item whose checks are usable is still
+`NEEDS_HUMAN_REVIEW` and lists its questions. It never becomes an automatic approval.
+Invalid mappings are rejected before configured commands run. Older configurations without
+`acceptance` remain valid.

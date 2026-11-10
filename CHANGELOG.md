@@ -2,6 +2,13 @@
 
 All notable changes to AgentProof are documented here.
 
+## 0.5.1 — 2026-11-10
+
+- Add explicit evidence levels: `NO_EVIDENCE`, `PARTIAL_EVIDENCE` and `EVIDENCE_NEEDS_REVIEW`.
+- Add actionable next steps to claim reviews and the review-first report.
+- Add optional `acceptance` mappings in `agentproof.json` to connect requirements, checks and human questions.
+- Report acceptance items as `MISSING_EVIDENCE` or `NEEDS_HUMAN_REVIEW` without certifying semantic correctness.
+
 ## 0.5.0 — 2026-11-09
 
 - Read bounded UTF-8 JUnit XML via a unique per-execution `{junit}` command placeholder.

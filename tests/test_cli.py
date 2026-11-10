@@ -322,6 +322,7 @@ class CLITest(unittest.TestCase):
         code, output = self.cli('review', '--claim', 'Tests passed')
         self.assertEqual(code, 0, output)
         self.assertIn('UNVERIFIED: Tests passed', output)
+        self.assertIn('Evidence level: NO_EVIDENCE', output)
 
     def test_review_can_read_summary_file(self):
         self.init()
@@ -338,6 +339,8 @@ class CLITest(unittest.TestCase):
         code, output = self.cli('review', '--claim', 'All tests passed')
         self.assertEqual(code, 0, output)
         self.assertIn('UNVERIFIED: All tests passed', output)
+        self.assertIn('Evidence level: NO_EVIDENCE', output)
+        self.assertIn('Next:', output)
 
     def test_review_comment_and_wrong_kind_cannot_prove_tests(self):
         self.init()

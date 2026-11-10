@@ -14,7 +14,7 @@ import time
 import uuid
 
 from . import __version__
-from .checks import configured_checks
+from .checks import configured_acceptance, configured_checks
 from .junit import parse_junit
 
 STORE = ".agentproof"
@@ -276,6 +276,32 @@ def latest_check_records(checks):
     return list(latest.values())
 
 
+def acceptance_assessment(root, latest, workspace_error):
+    """Map explicit acceptance items to check evidence without judging semantics."""
+    try:
+        items = configured_acceptance(root)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        return [{"id": "config", "description": "Invalid acceptance configuration", "status": "CONFIG_ERROR",
+                 "checks": [], "questions": [str(exc)]}]
+    result = []
+    by_name = {check.get("name"): check for check in latest}
+    for item in items:
+        linked = [by_name.get(name) for name in item.get("checks", [])]
+        missing = [name for name, check in zip(item.get("checks", []), linked) if check is None]
+        unusable = [check for check in linked if check is not None and not check["usable"]]
+        if missing or unusable or workspace_error:
+            status = "MISSING_EVIDENCE"
+            next_steps = ([f"Run configured check: {name}" for name in missing]
+                          + [f"Rerun or inspect check: {check.get('name')}" for check in unusable])
+        else:
+            status = "NEEDS_HUMAN_REVIEW"
+            next_steps = list(item.get("questions", [])) or ["Confirm that the linked checks cover this acceptance item."]
+        result.append({"id": item["id"], "description": item["description"], "status": status,
+                       "checks": item.get("checks", []), "questions": item.get("questions", []),
+                       "next_steps": next_steps})
+    return result
+
+
 def assessment(root, state):
     workspace_error = None
     try:
@@ -292,6 +318,7 @@ def assessment(root, state):
                "name": c.get("name"), "log": c["log"], "exit_code": c["exit_code"],
                **check_evidence(root, c, current_fp)} for c in state["checks"]]
     latest = latest_check_records(checks)
+    acceptance = acceptance_assessment(root, latest, workspace_error)
     attention = []
     if workspace_error:
         attention.append(f"Workspace comparison UNKNOWN: {workspace_error}. Execution records are retained.")
@@ -323,6 +350,9 @@ def assessment(root, state):
                     attention.append(f"Inspect {problem['outcome']}: {location}::{problem['name']} — {message}")
                 if len(tests["problems"]) > 3 or tests.get("problems_truncated"):
                     attention.append(f"More failure details for {label}; inspect the full report or source JUnit XML.")
+    for item in acceptance:
+        attention.append(f"Acceptance {item['status']}: {item['id']} — {item['description']}")
+        attention.extend(f"Next: {step}" for step in item["next_steps"])
     plan = state.get("check_runs", [{}])[-1].get("planned", [])
     for step in plan:
         if step["status"] in {"NOT_RUN", "RUNNING", "ERROR"}:
@@ -339,7 +369,7 @@ def assessment(root, state):
             "changes": [{"kind": k, "path": p} for k, p in changed], "checks": checks,
             "latest_checks": latest,
             "planned_checks": plan, "workspace_error": workspace_error,
-            "attention": attention, "review": review, "omitted": omitted,
+            "acceptance": acceptance, "attention": attention, "review": review, "omitted": omitted,
             "limitations": "Command receipts and file changes do not certify task completion."}
 
 
@@ -349,8 +379,11 @@ def brief_report(data):
              f"Latest successful commands with current files and intact logs: {sum(c['usable'] for c in data['latest_checks'])}.", ""]
     lines += [f"- {item}" for item in data["attention"]]
     if data["review"]:
-        lines += [f"- UNVERIFIED: {item['claim']} — {item['reason']}"
+        lines += [f"- UNVERIFIED [{item.get('evidence_level', 'UNKNOWN')}]: {item['claim']} — {item['reason']}"
                   for item in data["review"]["items"]]
+    for item in data.get("acceptance", []):
+        lines.append(f"- Acceptance **{item['status']}** `{item['id']}`: {item['description']}")
+        lines.extend(f"  - Next: {step}" for step in item["next_steps"])
     lines += ["", "Next: inspect `agentproof diff`, the relevant logs and acceptance scenarios.",
               "No automatic accept/reject decision is made."]
     return "\n".join(lines) + "\n"
@@ -438,6 +471,8 @@ def report(root, state, data=None, archived=False):
         lines += [f"Latest claim set: `{latest['source']}`; recomputed at {latest['time']}.", ""]
         for item in latest["items"]:
             lines.append(f"- **{item['status']}** {item['claim']} — {item['reason']}")
+            lines.append(f"  - Evidence level: **{item.get('evidence_level', 'UNKNOWN')}**")
+            lines += [f"  - Next: {step}" for step in item.get("next_steps", [])]
             lines += [f"  - Receipt: {receipt}" for receipt in item.get("receipts", [])]
         if latest.get("questions"):
             lines += ["", "### Human confirmation", ""]
@@ -473,6 +508,8 @@ def review_claims(root, state, claims, source, current_inventory=None):
         negated = bool(re.search(r"\b(?:not|never|no|failed)\b|未|没有|失败|不", lower))
         if negated:
             items.append({"status": "UNVERIFIED", "claim": claim,
+                          "evidence_level": "PARTIAL_EVIDENCE",
+                          "next_steps": ["Inspect the original output and confirm the stated limitation."],
                           "reason": "Negative or qualified statement; inspect the original evidence."})
             questions.append(f"Confirm the stated limitation: {claim}")
         elif kind and says_pass:
@@ -486,7 +523,11 @@ def review_claims(root, state, claims, source, current_inventory=None):
                     structured = True
                     receipts.append("JUnit reported: " + "; ".join(f"{k}: {v}" for k, v in tests["counts"].items())
                                     + " [source: " + tests["path"] + "]")
+            level = "EVIDENCE_NEEDS_REVIEW" if receipts else "NO_EVIDENCE"
             items.append({"status": "UNVERIFIED", "claim": claim, "receipts": receipts,
+                          "evidence_level": level,
+                          "next_steps": (["Inspect the linked report and confirm scope, coverage and requirements."
+                                          ] if receipts else [f"Run a fresh {kind} check and retain its output." ]),
                           "reason": ("Current JUnit report counts and outcomes are linked below. "
                                      "These are reporter-provided; coverage and requirements remain unverified."
                                      if structured else
@@ -497,12 +538,15 @@ def review_claims(root, state, claims, source, current_inventory=None):
             questions.append(f"Confirm scope and actual output for: {claim}")
         elif says_change:
             items.append({"status": "UNVERIFIED", "claim": claim,
+                          "evidence_level": "PARTIAL_EVIDENCE" if changed else "NO_EVIDENCE",
+                          "next_steps": [f"Inspect the relevant diff and add a reproducible acceptance check for: {claim}"],
                           "reason": (f"Observed {len(changed)} changed captured files; file changes do not establish this fix or implementation."
                                      if changed else "Captured file comparison is unavailable." if current is None else
                                      "No captured file changes; this does not rule out changes outside the captured scope.")})
             questions.append(f"Inspect the relevant diff and a reproducible acceptance check for: {claim}")
         else:
-            items.append({"status": "UNVERIFIED", "claim": claim, "reason": "没有可匹配的本地证据规则"})
+            items.append({"status": "UNVERIFIED", "claim": claim, "evidence_level": "NO_EVIDENCE",
+                          "next_steps": ["指定可复现的文件、命令或外部结果证据。"], "reason": "没有可匹配的本地证据规则"})
             questions.append("为这条声明指定可复现的文件、命令或外部结果证据。")
     return {"time": now(), "source": source, "items": items, "questions": list(dict.fromkeys(questions))}
 
@@ -717,8 +761,11 @@ def run(args, root):
         save(store / "task.json", state)
         for item in review["items"]:
             print(f"{item['status']}: {item['claim']} — {item['reason']}")
+            print(f"  Evidence level: {item.get('evidence_level', 'UNKNOWN')}")
             for receipt in item.get("receipts", []):
                 print(f"  Receipt: {receipt}")
+            for step in item.get("next_steps", []):
+                print(f"  Next: {step}")
         if review["questions"]:
             print("\nHuman confirmation:")
             for question in review["questions"]:

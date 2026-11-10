@@ -70,6 +70,32 @@ class WorkflowTest(unittest.TestCase):
         self.assertTrue((self.root / '.agentproof/report.md').is_file())
         self.assertTrue((self.root / '.agentproof/changes.patch').is_file())
 
+    def test_acceptance_items_link_checks_and_surface_human_questions(self):
+        self.config([self.check(name='tests')])
+        config = json.loads((self.root / 'agentproof.json').read_text(encoding='utf-8'))
+        config['acceptance'] = [{"id": "retry-limit", "description": "Retries stop at the configured limit",
+                                 "checks": ["tests"], "questions": ["Confirm the timeout scenario is covered."]}]
+        (self.root / 'agentproof.json').write_text(json.dumps(config), encoding='utf-8')
+        self.init()
+        self.assertEqual(self.cli('check')[0], 0)
+        data = json.loads(self.cli('status', '--json')[1])
+        self.assertEqual(data['acceptance'][0]['status'], 'NEEDS_HUMAN_REVIEW')
+        self.assertIn('Confirm the timeout scenario is covered.', data['acceptance'][0]['next_steps'])
+        report = self.cli('status', '--brief')[1]
+        self.assertIn('Acceptance NEEDS_HUMAN_REVIEW', report)
+
+    def test_acceptance_missing_check_is_actionable_and_config_errors_are_rejected(self):
+        self.config([self.check(name='tests')])
+        config = json.loads((self.root / 'agentproof.json').read_text(encoding='utf-8'))
+        config['acceptance'] = [{"id": "api", "description": "API remains compatible", "checks": ["contract"]}]
+        (self.root / 'agentproof.json').write_text(json.dumps(config), encoding='utf-8')
+        self.assertEqual(self.cli('check', '--list')[0], 2)
+        config['acceptance'] = [{"id": "api", "description": "API remains compatible", "checks": ["tests"]}]
+        (self.root / 'agentproof.json').write_text(json.dumps(config), encoding='utf-8')
+        self.init()
+        self.assertEqual(self.cli('check')[0], 0)
+        self.assertEqual(json.loads(self.cli('status', '--json')[1])['acceptance'][0]['status'], 'NEEDS_HUMAN_REVIEW')
+
     def test_interrupted_check_stops_remaining_commands_and_keeps_report(self):
         self.config([self.check(name='interrupted', script='raise SystemExit(130)'),
                      self.check(name='never-run', script='from pathlib import Path; Path("marker").touch()')])
