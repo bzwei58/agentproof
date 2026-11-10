@@ -188,3 +188,19 @@ agentproof history resume TASK_ID
 审查后可用 `outcome --review-seconds 90 --no-issue --decision accepted --note "实际观察"`
 记录结果；尚未统计是否发现问题时省略 `--no-issue` 和 `--found-issue`。
 仓库的 GitHub Actions 会生成可下载的 `agentproof-report`，包含报告、差异和日志，保留七天。
+
+## 先看结论，再按需看证据（0.8.1）
+
+报告开头只回答：这次改了什么、检查发现了什么、还需要你判断什么。
+详细命令、日志和差异折叠在后面，有疑问再展开。
+你可以直接反馈“这里符合要求”“这里要改”或“这一点看不懂”，不用保证全部代码正确。
+
+```bash
+agentproof init --goal "修复重试逻辑" --lang zh-CN
+# 已有活动任务，生成中文报告并记住语言：
+agentproof report --lang zh-CN
+agentproof status --brief
+```
+
+`status --lang en` 只改变当前显示，不改变任务设置。
+工具翻译报告模板，任务目标、场景描述和人工备注保留原文；JSON 中的技术状态不变。

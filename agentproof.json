@@ -19,34 +19,35 @@
   "acceptance": [
     {
       "id": "evidence-integrity",
-      "description": "A completed check remains linked to the current captured workspace and intact log",
+      "description": "检查结果是否仍然对应这次修改后的文件",
       "checks": [
         "unit-tests"
       ],
       "questions": [
-        "Does the report show the check matched the current files?",
-        "Is the command log present and unchanged?"
+        "你实际使用时，有没有遇到报告描述与实际结果明显矛盾的情况？不确定可以留空。"
       ],
       "files": [
         "agentproof/cli.py",
         "tests/test_workflow.py",
-        "tests/test_junit.py"
+        "tests/test_junit.py",
+        "agentproof/presentation.py"
       ]
     },
     {
       "id": "review-actionability",
-      "description": "The handoff report identifies evidence gaps and concrete human review questions",
+      "description": "读完报告后，是否知道接下来该看什么",
       "checks": [
         "unit-tests"
       ],
       "questions": [
-        "Did the report tell the reviewer what still needs confirmation?",
-        "Did it reduce the time spent finding the relevant log or diff?"
+        "只读报告开头，你能否知道这次改了什么、检查到什么、还有什么不能确定？",
+        "如果仍看不懂，请指出具体一句；你不需要保证代码正确。"
       ],
       "files": [
         "agentproof/cli.py",
         ".github/workflows/agentproof-report.yml",
-        "docs/checks.md"
+        "docs/checks.md",
+        "agentproof/presentation.py"
       ]
     }
   ]

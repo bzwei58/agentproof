@@ -70,3 +70,16 @@ The PR #18 Actions report was downloaded and inspected: it used the base commit,
 actual changed files and intact current check logs, and every relative Markdown evidence link
 resolved inside the artifact. Both acceptance items remained NEEDS_HUMAN_REVIEW. These
 observations establish the delivery mechanics; they do not measure review-time savings.
+
+## 0.8.1 report readability
+
+The real task reviewer could not tell what they were expected to review from the 0.8.0 handoff.
+That is recorded as a usability problem, with the overall decision deferred and no invented
+reading duration. The revised report leads with the requested task and observed file changes,
+check results and specific human questions. Technical evidence remains available in a folded
+section; missing or stale evidence is not hidden by the new wording.
+
+Regression checks cover overview/evidence ordering, questions appearing once, Chinese output,
+remembered versus temporary language choices, and invalidated confirmations or missing logs
+remaining visible in plain language. These checks establish report behavior, not that the new
+wording has solved the reviewer's comprehension problem. That still needs their feedback.

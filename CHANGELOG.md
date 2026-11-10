@@ -2,6 +2,14 @@
 
 All notable changes to AgentProof are documented here.
 
+## 0.8.1 — 2026-11-10
+
+- Lead reports with what changed, what checks found and what the reviewer still needs to decide.
+- Fold technical receipts, logs and full differences behind an optional evidence section.
+- Explain missing, failed and stale evidence in ordinary language without turning command success into approval.
+- Add English/Chinese report templates through `init`, `report` and `status --lang`; retain technical JSON states.
+- Keep recorded reviewer feedback and allow undecided outcomes without requiring a correctness guarantee.
+
 ## 0.8.0 — 2026-11-10
 
 This release combines the previously unreleased 0.6.0 and 0.7.0 development changes.

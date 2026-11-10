@@ -16,6 +16,7 @@ import uuid
 from . import __version__
 from .checks import configured_acceptance, configured_checks
 from .junit import parse_junit
+from .presentation import summary
 
 STORE = ".agentproof"
 MAX_FILE = 10 * 1024 * 1024
@@ -474,6 +475,7 @@ def assessment(root, state):
         attention.append("No completion claims supplied. Review the goal and relevant diff manually.")
     return {"schema_version": 1, "goal": state["goal"], "generated": now(),
             "baseline_mode": state.get("baseline_mode", "workspace"),
+            "report_language": state.get("report_language", "en"),
             "baseline_commit": state.get("baseline_commit"),
             "changes": [{"kind": k, "path": p} for k, p in changed], "checks": checks,
             "latest_checks": latest, "historical_checks": historical,
@@ -483,28 +485,8 @@ def assessment(root, state):
             "limitations": "Command receipts and file changes do not certify task completion."}
 
 
-def brief_report(data, include_acceptance=True):
-    changes = "UNKNOWN" if data["workspace_error"] else str(len(data["changes"]))
-    lines = ["## Review first", "", f"Changed files: {changes}. "
-             f"Latest successful commands with current files and intact logs: {sum(c['usable'] for c in data['latest_checks'])}.", ""]
-    lines += [f"- {item}" for item in data["attention"]
-              if not item.startswith(("Acceptance ", "Next: "))]
-    if data["review"]:
-        lines += [f"- UNVERIFIED [{item.get('evidence_level', 'UNKNOWN')}]: {item['claim']} — {item['reason']}"
-                  for item in data["review"]["items"]]
-    for item in data.get("acceptance", []) if include_acceptance else []:
-        lines.append(f"- Acceptance {item['status']} `{item['id']}`: {item['description']}")
-        if item.get("files"):
-            lines.append("  - Files: " + ", ".join(f"`{path}`" for path in item["files"]))
-        if item.get("decision"):
-            decision = item["decision"]
-            detail = decision.get("note") or decision.get("reason")
-            if detail:
-                lines.append(f"  - Human decision: {detail}")
-        lines.extend(f"  - Next: {step}" for step in item["next_steps"])
-    lines += ["", "Next: inspect `agentproof diff`, the relevant logs and acceptance scenarios.",
-              "No automatic accept/reject decision is made."]
-    return "\n".join(lines) + "\n"
+def brief_report(data):
+    return summary(data, data.get("report_language", "en"))
 
 
 def report(root, state, data=None, archived=False, artifact_links=False):
@@ -522,9 +504,11 @@ def report(root, state, data=None, archived=False, artifact_links=False):
             target = Path(name).relative_to(STORE).as_posix()
             return f"[{label}]({target})"
         return f"`{label}`"
-    lines = ["# AgentProof task evidence", "", f"Goal: {state['goal']}", "",
-             f"Generated: {data['generated']}", "", "This report records evidence; it does not certify correctness or task completion.",
-             "", brief_report(data, include_acceptance=False), "", "## Changes since baseline", ""]
+    chinese = data.get("report_language") == "zh-CN"
+    title = "# AgentProof 交付报告" if chinese else "# AgentProof handoff report"
+    detail_title = "详细证据（有疑问时再展开）" if chinese else "Technical evidence (open when needed)"
+    lines = [title, "", f"Generated: {data['generated']}", "", brief_report(data), "",
+             "<details>", f"<summary>{detail_title}</summary>", "", "## Changes since baseline", ""]
     if data.get("baseline_mode") == "historical_commit":
         lines += [f"Baseline: Git commit `{data.get('baseline_commit')}` (after-the-fact baseline).",
                   "This baseline can compare the current workspace with that commit, but cannot prove the complete pre-AI state or process.", ""]
@@ -612,8 +596,6 @@ def report(root, state, data=None, archived=False, artifact_links=False):
                         location = problem.get("file") or problem.get("class") or "unknown file"
                         lines.append(f"    - Failing case: `{location}::{problem['name']}` — "
                                      + " ".join(problem.get("message", "").split())[:300])
-            for question in item.get("questions", []):
-                lines.append(f"  - Human question: {question}")
             for step in item.get("next_steps", []):
                 if step not in item.get("questions", []):
                     lines.append(f"  - Next: {step}")
@@ -641,7 +623,8 @@ def report(root, state, data=None, archived=False, artifact_links=False):
             lines.append(f"- {outcome['decision']}{duration}{found}{note} ({outcome['time']})")
     else:
         lines += ["No human outcome recorded. Run `agentproof outcome --decision ...` after review."]
-    lines += ["", "Signals are heuristic observations, not proof of lost context or model errors.",
+    lines += ["", "This report does not certify correctness or task completion.",
+              "Signals are heuristic observations, not proof of lost context or model errors.",
               "Imported sessions are not automatically correlated with this task's file changes.",
               "", "## Scope and limitations", "",
               "- Snapshots cover Git-tracked and non-ignored untracked regular files, including initial local edits.",
@@ -664,6 +647,7 @@ def report(root, state, data=None, archived=False, artifact_links=False):
         if latest.get("questions"):
             lines += ["", "### Human confirmation", ""]
             lines += [f"- {question}" for question in latest["questions"]]
+    lines += ["", "</details>"]
     return "\n".join(lines) + "\n"
 
 
@@ -948,7 +932,8 @@ def run(args, root):
             with exclude_path.open("a", encoding="utf-8") as f:
                 f.write("\n/.agentproof/\n")
         state = {"version": 1, "goal": args.goal, "created": now(),
-                 "checkpoints": [], "checks": [], "sessions": [], "decisions": [], "outcomes": []}
+                 "checkpoints": [], "checks": [], "sessions": [], "decisions": [], "outcomes": [],
+                 "report_language": args.lang}
         if args.from_commit:
             state["baseline_mode"] = "historical_commit"
             state["baseline_commit"] = git(root, "rev-parse", "--verify", f"{args.from_commit}^{{commit}}").decode().strip()
@@ -1195,9 +1180,14 @@ def run(args, root):
         return 0 if code == 0 else 1
     elif args.action in ("report", "status"):
         if args.action == "report":
+            if args.lang:
+                state["report_language"] = args.lang
+                save(store / "task.json", state)
             print(write_report(root, state))
         else:
             data = assessment(root, state)
+            if args.lang and not args.json:
+                data["report_language"] = args.lang
             if args.json:
                 print(json.dumps(data, ensure_ascii=False, indent=2))
             else:
@@ -1254,6 +1244,7 @@ def main(argv=None):
     sub = parser.add_subparsers(dest="action", required=True)
     p = sub.add_parser("init", help="Start a task and capture its baseline")
     p.add_argument("--goal", required=True)
+    p.add_argument("--lang", choices=["en", "zh-CN"], default="en", help="Report language for this task")
     p.add_argument("--from-commit", help="Use a Git commit as an after-the-fact baseline")
     p = sub.add_parser("checkpoint", help="Capture current files without changing Git history")
     p.add_argument("--label", default="manual checkpoint")
@@ -1282,8 +1273,10 @@ def main(argv=None):
     p.add_argument("--junit", action="store_true", help="Read this run's JUnit XML via a {junit} command placeholder")
     p.add_argument("--timeout", type=float, default=300)
     p.add_argument("command", nargs=argparse.REMAINDER)
-    sub.add_parser("report", help="Write .agentproof/report.md")
+    p = sub.add_parser("report", help="Write .agentproof/report.md")
+    p.add_argument("--lang", choices=["en", "zh-CN"], help="Save the report language for this task")
     p = sub.add_parser("status", help="Print current evidence report")
+    p.add_argument("--lang", choices=["en", "zh-CN"], help="Report language for this display")
     output = p.add_mutually_exclusive_group()
     output.add_argument("--brief", action="store_true", help="Print review priorities first")
     output.add_argument("--json", action="store_true", help="Print a versioned machine-readable assessment")
