@@ -115,6 +115,10 @@ agentproof reject timeout-no-double-charge --reason "The lost-response scenario 
 Decisions are tied to the current files, acceptance configuration and linked check receipts.
 If any of those change, the report shows `STALE_CONFIRMATION` and asks for a new decision.
 
+If the task started before AgentProof was initialized, `agentproof init --from-commit COMMIT --goal '...'`
+can capture a Git commit as an explicitly marked after-the-fact baseline. It helps compare files,
+but the report explains that it cannot prove the complete pre-AI state or process.
+
 ### Captured evidence
 
 - SHA-256 fingerprints and modes of captured files, plus full file checkpoints.

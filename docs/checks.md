@@ -137,3 +137,15 @@ If files, the acceptance mapping, a linked log or structured result changes, or 
 is run again, the old decision becomes `STALE_CONFIRMATION`. This requests a new review; it is
 not an automatic correctness judgement. The full decision history remains in `task.json` and
 the latest decision is shown in `status`, `status --json` and `report`.
+
+### After-the-fact baseline
+
+For a task that began before AgentProof was initialized, use:
+
+```bash
+agentproof init --from-commit HEAD~1 --goal "Review the change"
+```
+
+The report marks this as `baseline_mode: historical_commit`. It is a useful file comparison
+anchor, but it cannot prove what the workspace contained before the AI task or reconstruct the
+full interaction history.

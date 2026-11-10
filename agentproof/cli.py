@@ -205,6 +205,48 @@ def checkpoint(root, state, label):
     return snap
 
 
+def checkpoint_from_commit(root, state, commit, label):
+    """Capture a baseline from a Git commit for a task started after the fact."""
+    resolved = git(root, "rev-parse", "--verify", f"{commit}^{{commit}}").decode().strip()
+    entries = git(root, "ls-tree", "-r", "-z", "--full-tree", resolved)
+    files, omitted, total = {}, [], 0
+    for raw in entries.split(b"\0"):
+        if not raw:
+            continue
+        header, name_bytes = raw.split(b"\t", 1)
+        mode, kind, _object = header.decode("ascii").split(" ", 2)
+        name = os.fsdecode(name_bytes)
+        if kind != "blob":
+            omitted.append({"path": name, "reason": "not a regular file in commit"})
+            continue
+        if sensitive(name):
+            omitted.append({"path": name, "reason": "sensitive filename"})
+            continue
+        safe_path(root, name)
+        data = git(root, "show", f"{resolved}:{name}")
+        if len(data) > MAX_FILE:
+            raise ValueError(f"File exceeds 10 MiB snapshot limit: {name}")
+        total += len(data)
+        if total > MAX_TOTAL:
+            raise ValueError("Workspace exceeds 100 MiB snapshot limit")
+        files[name] = {"sha256": hashlib.sha256(data).hexdigest(), "mode": int(mode, 8) & 0o777}
+    ident = uuid.uuid4().hex[:12]
+    directory = root / STORE / "snapshots" / ident
+    directory.mkdir(parents=True)
+    for name in files:
+        data = git(root, "show", f"{resolved}:{name}")
+        dest = directory / "files" / name
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(data)
+    snap = {"id": ident, "label": label, "time": now(), "files": files,
+            "omitted": omitted, "fingerprint": fingerprint(files, omitted),
+            "baseline_mode": "historical_commit", "commit": resolved}
+    save(directory / "manifest.json", snap)
+    state["checkpoints"].append({k: snap[k] for k in ("id", "label", "time")})
+    save(root / STORE / "task.json", state)
+    return snap
+
+
 def get_snapshot(root, state, ident):
     if ident not in {x["id"] for x in state["checkpoints"]}:
         raise ValueError("Unknown checkpoint ID")
@@ -423,6 +465,8 @@ def assessment(root, state):
     else:
         attention.append("No completion claims supplied. Review the goal and relevant diff manually.")
     return {"schema_version": 1, "goal": state["goal"], "generated": now(),
+            "baseline_mode": state.get("baseline_mode", "workspace"),
+            "baseline_commit": state.get("baseline_commit"),
             "changes": [{"kind": k, "path": p} for k, p in changed], "checks": checks,
             "latest_checks": latest, "historical_checks": historical,
             "planned_checks": plan, "workspace_error": workspace_error,
@@ -463,6 +507,9 @@ def report(root, state, data=None, archived=False):
     lines = ["# AgentProof task evidence", "", f"Goal: {state['goal']}", "",
              f"Generated: {data['generated']}", "", "This report records evidence; it does not certify correctness or task completion.",
              "", brief_report(data), "", "## Changes since task start", ""]
+    if data.get("baseline_mode") == "historical_commit":
+        lines += [f"Baseline: Git commit `{data.get('baseline_commit')}` (after-the-fact baseline).",
+                  "This baseline can compare the current workspace with that commit, but cannot prove the complete pre-AI state or process.", ""]
     lines += ([f"- {c['kind']}: `{c['path']}`" for c in data["changes"]]
               or ["Comparison unavailable." if data["workspace_error"] else "No captured file changes."])
     lines += ["", "Compare with the captured task baseline using `agentproof diff`."]
@@ -779,7 +826,15 @@ def run(args, root):
                 f.write("\n/.agentproof/\n")
         state = {"version": 1, "goal": args.goal, "created": now(),
                  "checkpoints": [], "checks": [], "sessions": [], "decisions": []}
-        snap = checkpoint(root, state, "task start")
+        if args.from_commit:
+            state["baseline_mode"] = "historical_commit"
+            state["baseline_commit"] = git(root, "rev-parse", "--verify", f"{args.from_commit}^{{commit}}").decode().strip()
+            snap = checkpoint_from_commit(root, state, state["baseline_commit"],
+                                          f"historical baseline: {state['baseline_commit'][:12]}")
+            print("This is an after-the-fact baseline; it cannot prove the complete pre-AI state or process.")
+        else:
+            state["baseline_mode"] = "workspace"
+            snap = checkpoint(root, state, "task start")
         print(f"Task initialized. Baseline: {snap['id']} ({len(snap['files'])} files)")
         return 0
     if not (store / "task.json").exists():
@@ -1060,6 +1115,7 @@ def main(argv=None):
     sub = parser.add_subparsers(dest="action", required=True)
     p = sub.add_parser("init", help="Start a task and capture its baseline")
     p.add_argument("--goal", required=True)
+    p.add_argument("--from-commit", help="Use a Git commit as an after-the-fact baseline")
     p = sub.add_parser("checkpoint", help="Capture current files without changing Git history")
     p.add_argument("--label", default="manual checkpoint")
     p = sub.add_parser("import-session", help="Import Claude Code JSONL signal counts")

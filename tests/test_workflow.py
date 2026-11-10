@@ -171,6 +171,22 @@ class WorkflowTest(unittest.TestCase):
         path.write_text(json.dumps(state), encoding='utf-8')
         self.assertEqual(self.cli('status', '--json')[0], 0)
 
+    def test_init_from_commit_records_after_the_fact_baseline(self):
+        (self.root / 'app.py').write_text('committed\n')
+        subprocess.run(['git', 'add', 'app.py'], check=True)
+        subprocess.run(['git', 'commit', '-qm', 'baseline'], check=True)
+        commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+        (self.root / 'app.py').write_text('current\n')
+        code, output = self.cli('init', '--goal', 'Historical review', '--from-commit', commit)
+        self.assertEqual(code, 0, output)
+        self.assertIn('after-the-fact baseline', output)
+        data = json.loads(self.cli('status', '--json')[1])
+        self.assertEqual(data['baseline_mode'], 'historical_commit')
+        self.assertEqual(data['baseline_commit'], commit)
+        self.assertIn('committed', self.cli('diff')[1])
+        self.assertEqual(self.cli('report')[0], 0)
+        self.assertIn('after-the-fact baseline', (self.root / '.agentproof/report.md').read_text(encoding='utf-8'))
+
     def test_interrupted_check_stops_remaining_commands_and_keeps_report(self):
         self.config([self.check(name='interrupted', script='raise SystemExit(130)'),
                      self.check(name='never-run', script='from pathlib import Path; Path("marker").touch()')])

@@ -8,6 +8,7 @@ All notable changes to AgentProof are documented here.
 - Bind decisions to the captured workspace, acceptance configuration and linked check receipts.
 - Mark decisions as `STALE_CONFIRMATION` after file edits, log tampering, configuration changes or check reruns.
 - Preserve human notes and rejection reasons in JSON and Markdown reports.
+- Add `init --from-commit` for explicitly marked after-the-fact baselines.
 
 ## 0.5.1 — 2026-11-10
 
