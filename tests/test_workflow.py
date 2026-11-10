@@ -187,6 +187,21 @@ class WorkflowTest(unittest.TestCase):
         self.assertEqual(self.cli('report')[0], 0)
         self.assertIn('after-the-fact baseline', (self.root / '.agentproof/report.md').read_text(encoding='utf-8'))
 
+    def test_history_show_and_resume_keeps_archive_immutable(self):
+        self.init()
+        self.assertEqual(self.cli('verify', '--', sys.executable, '-c', 'print("ok")')[0], 0)
+        self.assertEqual(self.cli('finish')[0], 0)
+        archive = next((self.root / '.agentproof/history').iterdir())
+        task_id = archive.name
+        code, output = self.cli('history', 'show', task_id)
+        self.assertEqual(code, 0, output)
+        self.assertIn('Review workflow', output)
+        self.assertEqual(self.cli('history', 'resume', task_id)[0], 0)
+        self.assertTrue((self.root / '.agentproof/task.json').exists())
+        resumed = json.loads((self.root / '.agentproof/task.json').read_text(encoding='utf-8'))
+        self.assertEqual(resumed['resumed_from'], task_id)
+        self.assertTrue((archive / 'task.json').exists())
+
     def test_interrupted_check_stops_remaining_commands_and_keeps_report(self):
         self.config([self.check(name='interrupted', script='raise SystemExit(130)'),
                      self.check(name='never-run', script='from pathlib import Path; Path("marker").touch()')])

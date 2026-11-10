@@ -2,6 +2,11 @@
 
 All notable changes to AgentProof are documented here.
 
+## 0.7.0 — 2026-11-10
+
+- Fold historical check executions into a collapsed human report section while retaining full JSON history.
+- Add `history show TASK_ID` and `history resume TASK_ID`; archives remain immutable when resumed.
+
 ## 0.6.0 — 2026-11-10
 
 - Add explicit `confirm` and `reject` commands for human acceptance decisions.

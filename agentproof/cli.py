@@ -801,6 +801,33 @@ def run(args, root):
     if args.action == "history":
         entries = [(path, load(path)) for path in (store / "history").glob("*/task.json")
                    if not path.parent.name.startswith(".")]
+        if args.history_action in {"show", "resume"}:
+            match = next(((path, task) for path, task in entries
+                          if task.get("id") == args.id or path.parent.name == args.id), None)
+            if match is None:
+                raise ValueError(f"Unknown archived task: {args.id}")
+            archive, task = match
+            if args.history_action == "show":
+                if args.json:
+                    print(json.dumps(task, ensure_ascii=False, indent=2))
+                else:
+                    print(f"{task.get('id', archive.parent.name)} | {task.get('finished', 'unknown')} | {task['goal']}")
+                    print(f"Report: {archive.parent / 'report.md'}")
+                    print(f"Evidence: {archive.parent}")
+                return 0
+            if (store / "task.json").exists():
+                raise ValueError("An active task already exists; finish it before resuming history")
+            for name in ("snapshots", "checks", "results"):
+                source = archive.parent / name
+                if source.exists():
+                    shutil.copytree(source, store / name)
+            resumed = {key: value for key, value in task.items() if key not in {"id", "finished"}}
+            resumed["resumed_from"] = task.get("id", archive.parent.name)
+            resumed["resumed_at"] = now()
+            save(store / "task.json", resumed)
+            print(f"Resumed archived task: {task.get('id', archive.parent.name)}")
+            print("The archive remains unchanged; new evidence will be recorded in the active task.")
+            return 0
         for path, task in sorted(entries, key=lambda item: item[1]["finished"], reverse=True):
             print(f"{task['id']} | {task['finished']} | {task['goal']}")
             print(f"  Report: {path.parent / 'report.md'}")
@@ -1145,7 +1172,10 @@ def main(argv=None):
     p = sub.add_parser("diff", help="Compare current captured files with the task baseline")
     p.add_argument("path", nargs="?", help="Optional repository-relative captured path")
     sub.add_parser("finish", help="Archive task evidence without approving correctness")
-    sub.add_parser("history", help="List archived tasks and their reports")
+    p = sub.add_parser("history", help="List, inspect or resume archived tasks")
+    p.add_argument("history_action", nargs="?", choices=["show", "resume"])
+    p.add_argument("id", nargs="?")
+    p.add_argument("--json", action="store_true", help="Show an archived task as JSON")
     p = sub.add_parser("restore", help="Preview file restoration; new files are retained")
     p.add_argument("id")
     p.add_argument("--apply", action="store_true")

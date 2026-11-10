@@ -119,6 +119,13 @@ If the task started before AgentProof was initialized, `agentproof init --from-c
 can capture a Git commit as an explicitly marked after-the-fact baseline. It helps compare files,
 but the report explains that it cannot prove the complete pre-AI state or process.
 
+Completed tasks can be inspected or resumed without changing the archive:
+
+```bash
+agentproof history show TASK_ID
+agentproof history resume TASK_ID
+```
+
 ### Captured evidence
 
 - SHA-256 fingerprints and modes of captured files, plus full file checkpoints.

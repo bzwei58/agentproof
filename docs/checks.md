@@ -149,3 +149,7 @@ agentproof init --from-commit HEAD~1 --goal "Review the change"
 The report marks this as `baseline_mode: historical_commit`. It is a useful file comparison
 anchor, but it cannot prove what the workspace contained before the AI task or reconstruct the
 full interaction history.
+
+Archived tasks can be inspected with `agentproof history show TASK_ID` or resumed with
+`agentproof history resume TASK_ID`. Resuming copies the evidence into a new active task and
+leaves the original archive unchanged.
