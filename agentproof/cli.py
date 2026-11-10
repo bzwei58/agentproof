@@ -340,6 +340,9 @@ def acceptance_assessment(root, latest, workspace_error):
             next_steps = list(item.get("questions", [])) or ["Confirm that the linked checks cover this acceptance item."]
         result.append({"id": item["id"], "description": item["description"], "status": status,
                        "checks": item.get("checks", []), "files": item.get("files", []),
+                       "linked_checks": [{key: check.get(key) for key in
+                                           ("name", "log", "execution", "workspace", "usable", "test_results")}
+                                          for check in linked if check is not None],
                        "questions": item.get("questions", []),
                        "next_steps": next_steps})
     return result
@@ -480,16 +483,17 @@ def assessment(root, state):
             "limitations": "Command receipts and file changes do not certify task completion."}
 
 
-def brief_report(data):
+def brief_report(data, include_acceptance=True):
     changes = "UNKNOWN" if data["workspace_error"] else str(len(data["changes"]))
     lines = ["## Review first", "", f"Changed files: {changes}. "
              f"Latest successful commands with current files and intact logs: {sum(c['usable'] for c in data['latest_checks'])}.", ""]
-    lines += [f"- {item}" for item in data["attention"]]
+    lines += [f"- {item}" for item in data["attention"]
+              if not item.startswith(("Acceptance ", "Next: "))]
     if data["review"]:
         lines += [f"- UNVERIFIED [{item.get('evidence_level', 'UNKNOWN')}]: {item['claim']} — {item['reason']}"
                   for item in data["review"]["items"]]
-    for item in data.get("acceptance", []):
-        lines.append(f"- Acceptance **{item['status']}** `{item['id']}`: {item['description']}")
+    for item in data.get("acceptance", []) if include_acceptance else []:
+        lines.append(f"- Acceptance {item['status']} `{item['id']}`: {item['description']}")
         if item.get("files"):
             lines.append("  - Files: " + ", ".join(f"`{path}`" for path in item["files"]))
         if item.get("decision"):
@@ -503,7 +507,7 @@ def brief_report(data):
     return "\n".join(lines) + "\n"
 
 
-def report(root, state, data=None, archived=False):
+def report(root, state, data=None, archived=False, artifact_links=False):
     data = data if data is not None else assessment(root, state)
     def source_label(name):
         if archived:
@@ -512,9 +516,15 @@ def report(root, state, data=None, archived=False):
             except ValueError:
                 pass
         return name
+    def evidence_link(name):
+        label = source_label(name)
+        if archived or artifact_links:
+            target = Path(name).relative_to(STORE).as_posix()
+            return f"[{label}]({target})"
+        return f"`{label}`"
     lines = ["# AgentProof task evidence", "", f"Goal: {state['goal']}", "",
              f"Generated: {data['generated']}", "", "This report records evidence; it does not certify correctness or task completion.",
-             "", brief_report(data), "", "## Changes since task start", ""]
+             "", brief_report(data, include_acceptance=False), "", "## Changes since baseline", ""]
     if data.get("baseline_mode") == "historical_commit":
         lines += [f"Baseline: Git commit `{data.get('baseline_commit')}` (after-the-fact baseline).",
                   "This baseline can compare the current workspace with that commit, but cannot prove the complete pre-AI state or process.", ""]
@@ -541,7 +551,7 @@ def report(root, state, data=None, archived=False):
                   f"{freshness}; "
                   f"declared kind: {check.get('kind', 'other')}; "
                   f"log integrity: **{evidence['log_integrity']}**; "
-                  f"log: `{source_label(check['log'])}`"]
+                  f"log: {evidence_link(check['log'])}"]
         if check.get("timed_out"):
             lines += ["  Timed out; process-tree termination was requested."]
         if check.get("capture_error"):
@@ -581,11 +591,32 @@ def report(root, state, data=None, archived=False):
         lines += [f"- **{step['status']}** `{step['name']}` — declared kind: {step['kind']}"
                   for step in data["planned_checks"]]
     if data.get("acceptance"):
-        lines += ["", "## Human acceptance decisions", ""]
+        lines += ["", "## Acceptance scenarios and human decisions", ""]
         for item in data["acceptance"]:
             lines.append(f"- **{item['status']}** `{item['id']}` — {item['description']}")
-            if item.get("files"):
-                lines.append("  - Files: " + ", ".join(f"`{path}`" for path in item["files"]))
+            for path in item.get("files", []):
+                captured = any(change["path"] == path for change in data["changes"])
+                if captured:
+                    target = "diffs/" + hashlib.sha256(path.encode()).hexdigest()[:16] + ".patch"
+                    entry = f"[diff]({target})" if archived or artifact_links else f"`agentproof diff {path}`"
+                    lines.append(f"  - File: `{path}` — {entry}")
+                else:
+                    lines.append(f"  - File: `{path}` — no captured change; inspect its existing behavior.")
+            for check in item.get("linked_checks", []):
+                lines.append(f"  - Check `{check['name']}`: {check['execution']}; {check['workspace']}; "
+                             f"log: {evidence_link(check['log'])}")
+                tests = check.get("test_results")
+                if tests is not None:
+                    lines.append(f"    - JUnit: {tests['status']}; {evidence_link(tests['path'])}")
+                    for problem in tests.get("problems", []):
+                        location = problem.get("file") or problem.get("class") or "unknown file"
+                        lines.append(f"    - Failing case: `{location}::{problem['name']}` — "
+                                     + " ".join(problem.get("message", "").split())[:300])
+            for question in item.get("questions", []):
+                lines.append(f"  - Human question: {question}")
+            for step in item.get("next_steps", []):
+                if step not in item.get("questions", []):
+                    lines.append(f"  - Next: {step}")
             decision = item.get("decision")
             if decision:
                 if decision.get("note"):
@@ -604,7 +635,8 @@ def report(root, state, data=None, archived=False):
         for outcome in data["outcomes"]:
             duration = (f"; review seconds: {outcome['review_seconds']}"
                         if outcome.get("review_seconds") is not None else "")
-            found = "; issue found" if outcome.get("found_issue") else "; no issue reported"
+            found = ("; issue found" if outcome.get("found_issue") is True else
+                     "; no issue found" if outcome.get("found_issue") is False else "; issue result not recorded")
             note = f"; {outcome['note']}" if outcome.get("note") else ""
             lines.append(f"- {outcome['decision']}{duration}{found}{note} ({outcome['time']})")
     else:
@@ -770,7 +802,20 @@ def write_report(root, state):
     except (OSError, ValueError) as exc:
         comparison = f"Comparison unavailable: {exc}\n"
     (store / "changes.patch").write_text(comparison, encoding="utf-8")
-    content = report(root, state)
+    data = assessment(root, state)
+    related = {path for item in data["acceptance"] for path in item.get("files", [])}
+    for change in data["changes"]:
+        path = change["path"]
+        if path in related:
+            directory = store / "diffs"
+            directory.mkdir(exist_ok=True)
+            target = directory / (hashlib.sha256(path.encode()).hexdigest()[:16] + ".patch")
+            try:
+                patch = workspace_diff(root, state, path)
+            except (OSError, ValueError) as exc:
+                patch = f"Comparison unavailable: {exc}\n"
+            target.write_text(patch, encoding="utf-8")
+    content = report(root, state, data=data, artifact_links=True)
     content = content.replace("Compare with the captured task baseline using `agentproof diff`.",
                               "[View captured baseline diff](changes.patch), or run `agentproof diff`.")
     (store / "report.md").write_text(content, encoding="utf-8")
@@ -788,7 +833,7 @@ def finish_task(root, state):
     pending, destination = history / ("." + ident + ".pending"), history / ident
     pending.mkdir()
     try:
-        for name in ("snapshots", "checks", "results"):
+        for name in ("snapshots", "checks", "results", "diffs"):
             source = store / name
             if source.is_symlink():
                 raise ValueError(f"Cannot archive symlink evidence directory: {name}")
@@ -808,7 +853,7 @@ def finish_task(root, state):
         raise
     # Do not remove active evidence until a complete archive is in place.
     (store / "task.json").unlink()
-    for name in ("snapshots", "checks", "results"):
+    for name in ("snapshots", "checks", "results", "diffs"):
         if (store / name).exists():
             shutil.rmtree(store / name)
     for name in ("report.md", "changes.patch"):
@@ -818,7 +863,7 @@ def finish_task(root, state):
 
 def resume_task(store, archive, task):
     """Stage a complete evidence copy before publishing an active task."""
-    names = ("snapshots", "checks", "results")
+    names = ("snapshots", "checks", "results", "diffs")
     if (store / "task.json").exists():
         raise ValueError("An active task already exists; finish it before resuming history")
     if any((store / name).exists() or (store / name).is_symlink() for name in names):

@@ -310,6 +310,30 @@ class WorkflowTest(unittest.TestCase):
         self.assertEqual(self.cli('outcome', '--decision', 'deferred')[0], 0)
         self.assertIsNone(json.loads(self.cli('status', '--json')[1])['outcomes'][-1]['found_issue'])
 
+    def test_report_links_changed_files_and_lists_scenarios_once(self):
+        self.acceptance_config([{'id': 'api', 'description': 'API remains compatible',
+                                 'checks': ['tests'], 'files': ['app.py'],
+                                 'questions': ['Does the timeout scenario work?']}])
+        self.init()
+        (self.root / 'app.py').write_text('updated API')
+        self.assertEqual(self.cli('check')[0], 0)
+        content = (self.root / '.agentproof/report.md').read_text()
+        self.assertEqual(content.count('Does the timeout scenario work?'), 1)
+        self.assertIn('Check `tests`: PASS; CURRENT', content)
+        import re
+        target = re.search(r'\[diff\]\((diffs/[^)]+)\)', content).group(1)
+        self.assertTrue((self.root / '.agentproof' / target).exists())
+        self.assertIn('updated API', (self.root / '.agentproof' / target).read_text())
+        self.assertEqual(self.cli('finish')[0], 0)
+        archive = next((self.root / '.agentproof/history').iterdir())
+        self.assertTrue((archive / target).exists())
+        self.assertIn('[checks/', (archive / 'report.md').read_text())
+
+    def test_acceptance_paths_reject_unsafe_or_nonportable_names(self):
+        for name in ('../outside', '/absolute', 'C:/absolute', '.agentproof/task.json', 'a\\b'):
+            self.acceptance_config([{'id': 'api', 'description': 'Test paths', 'files': [name]}])
+            self.assertEqual(self.cli('check', '--list')[0], 2, name)
+
     def test_outcome_records_real_review_signal(self):
         self.init()
         code, output = self.cli('outcome', '--review-seconds', '42', '--found-issue',

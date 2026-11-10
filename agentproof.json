@@ -4,7 +4,15 @@
     {
       "name": "unit-tests",
       "kind": "test",
-      "command": ["python", "-m", "unittest", "discover", "-s", "tests", "-v"],
+      "command": [
+        "python",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests",
+        "-v"
+      ],
       "timeout": 300
     }
   ],
@@ -12,19 +20,33 @@
     {
       "id": "evidence-integrity",
       "description": "A completed check remains linked to the current captured workspace and intact log",
-      "checks": ["unit-tests"],
+      "checks": [
+        "unit-tests"
+      ],
       "questions": [
         "Does the report show the check matched the current files?",
         "Is the command log present and unchanged?"
+      ],
+      "files": [
+        "agentproof/cli.py",
+        "tests/test_workflow.py",
+        "tests/test_junit.py"
       ]
     },
     {
       "id": "review-actionability",
       "description": "The handoff report identifies evidence gaps and concrete human review questions",
-      "checks": ["unit-tests"],
+      "checks": [
+        "unit-tests"
+      ],
       "questions": [
         "Did the report tell the reviewer what still needs confirmation?",
         "Did it reduce the time spent finding the relevant log or diff?"
+      ],
+      "files": [
+        "agentproof/cli.py",
+        ".github/workflows/agentproof-report.yml",
+        "docs/checks.md"
       ]
     }
   ]
