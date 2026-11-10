@@ -114,7 +114,7 @@ class JUnitTest(unittest.TestCase):
         output = self.cli('review', '--claim', 'All tests passed')[1]
         self.assertIn('UNVERIFIED: All tests passed', output)
         self.assertIn('Receipt:', output)
-        self.assertIn('1 tests', self.cli('status', '--brief')[1])
+        self.assertIn('1 passed', self.cli('status', '--brief')[1])
 
     def test_reported_failure_overrides_zero_command_exit(self):
         self.init()
@@ -130,6 +130,9 @@ class JUnitTest(unittest.TestCase):
             data = self.run_xml(xml, expected=1)
             self.assertFalse(data['checks'][-1]['usable'])
             self.assertTrue(any('No executed test cases' in item for item in data['attention']))
+            overview = self.cli('status', '--brief')[1]
+            self.assertIn('no executed test cases were reported', overview)
+            self.assertNotIn('completed successfully', overview)
 
     def test_old_report_cannot_fill_missing_current_output(self):
         (self.root / 'old.xml').write_text(PASS, encoding='utf-8')

@@ -219,3 +219,22 @@ Ignored dependencies, external services and environment changes remain outside s
 
 Session import recognizes Claude message blocks and Codex `response_item.payload` and
 `compacted` events. Native Cline/Cursor formats remain unvalidated.
+
+### Reports in plain language (0.8.1+)
+
+Reports now begin with three questions: what changed, what checks found, and what you still
+need to decide. Technical evidence is folded below the overview. A passing command remains
+separate from the reviewer's judgment; no checks, outdated checks and damaged logs stay visible.
+Reviewers can answer in ordinary words or leave a result undecided.
+
+```bash
+agentproof init --goal "Fix retry behavior" --lang en
+agentproof report --lang zh-CN
+agentproof status --brief
+agentproof status --brief --lang en
+```
+
+`init` sets the task's report language; `report --lang` remembers a new language for later
+reports and archives. `status --lang` changes only that display. English is the default.
+Template messages are translated; the goal, configured scenarios and human notes stay in the
+language they were written in. JSON retains the evidence states used by integrations.

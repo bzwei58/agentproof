@@ -84,7 +84,7 @@ class WorkflowTest(unittest.TestCase):
         self.assertEqual(data['acceptance'][0]['status'], 'NEEDS_HUMAN_REVIEW')
         self.assertIn('Confirm the timeout scenario is covered.', data['acceptance'][0]['next_steps'])
         report = self.cli('status', '--brief')[1]
-        self.assertIn('Acceptance NEEDS_HUMAN_REVIEW', report)
+        self.assertIn('your judgment is still needed', report)
 
     def test_acceptance_files_are_preserved_in_json_and_report(self):
         self.config([self.check(name='tests')])
@@ -334,6 +334,65 @@ class WorkflowTest(unittest.TestCase):
             self.acceptance_config([{'id': 'api', 'description': 'Test paths', 'files': [name]}])
             self.assertEqual(self.cli('check', '--list')[0], 2, name)
 
+    def test_plain_report_puts_review_before_folded_evidence(self):
+        self.acceptance_config([{'id': 'timeout', 'description': 'Timeout stops retrying',
+                                 'checks': ['tests'], 'questions': ['Does retrying stop after a timeout?']}])
+        self.init()
+        (self.root / 'app.py').write_text('new behavior')
+        self.assertEqual(self.cli('check')[0], 0)
+        content = (self.root / '.agentproof/report.md').read_text()
+        overview, evidence = content.split('<details>', 1)
+        self.assertIn('What changed', overview)
+        self.assertIn('What checks found', overview)
+        self.assertIn('What you still need to decide', overview)
+        self.assertIn('Does retrying stop after a timeout?', overview)
+        self.assertNotIn('NEEDS_HUMAN_REVIEW', overview)
+        self.assertNotIn('log_sha256', overview)
+        self.assertIn('## Verification', evidence)
+        self.assertIn('NEEDS_HUMAN_REVIEW', evidence)
+        self.assertEqual(content.count('Does retrying stop after a timeout?'), 1)
+
+    def test_plain_report_separates_implementer_claims_from_observed_evidence(self):
+        self.init()
+        claim = 'Implemented retry timeout handling'
+        self.assertEqual(self.cli('review', '--claim', claim)[0], 0)
+        overview = self.cli('status', '--brief')[1]
+        self.assertIn(claim, overview)
+        self.assertIn('statements to check against the evidence', overview)
+        self.assertIn('Observed changes in 0 captured files', overview)
+        data = json.loads(self.cli('status', '--json')[1])
+        self.assertEqual(data['review']['items'][0]['status'], 'UNVERIFIED')
+
+    def test_chinese_report_language_persists_and_display_override_does_not_mutate(self):
+        self.assertEqual(self.cli('init', '--goal', '修复重试', '--lang', 'zh-CN')[0], 0)
+        self.assertIn('还没有记录检查结果', self.cli('status', '--brief')[1])
+        self.assertEqual(self.cli('report')[0], 0)
+        path = self.root / '.agentproof/report.md'
+        self.assertIn('还需要你判断什么', path.read_text(encoding='utf-8'))
+        self.assertIn('What changed', self.cli('status', '--brief', '--lang', 'en')[1])
+        self.assertEqual(json.loads(self.cli('status', '--json')[1])['report_language'], 'zh-CN')
+        self.assertEqual(self.cli('report', '--lang', 'en')[0], 0)
+        self.assertIn('What changed', path.read_text(encoding='utf-8'))
+        self.assertIn('What changed', self.cli('status', '--brief')[1])
+        self.assertEqual(self.cli('finish')[0], 0)
+        archive = next((self.root / '.agentproof/history').iterdir())
+        self.assertEqual(self.cli('history', 'resume', archive.name)[0], 0)
+        self.assertEqual(json.loads(self.cli('status', '--json')[1])['report_language'], 'en')
+
+    def test_plain_report_does_not_present_stale_or_missing_logs_as_success(self):
+        self.decision_setup()
+        self.assertEqual(self.cli('check')[0], 0)
+        self.assertEqual(self.cli('confirm', 'evidence')[0], 0)
+        (self.root / 'app.py').write_text('edited after checking')
+        content = self.cli('status', '--brief', '--lang', 'zh-CN')[1]
+        self.assertIn('需要重新检查', content)
+        self.assertIn('需要重新看这一项', content)
+        self.assertNotIn('执行成功，结果仍对应当前文件', content)
+        self.assertEqual(self.cli('check')[0], 0)
+        state = json.loads((self.root / '.agentproof/task.json').read_text())
+        (self.root / state['checks'][-1]['log']).unlink()
+        self.assertIn('日志缺失、变化或无法核对', self.cli('status', '--brief', '--lang', 'zh-CN')[1])
+
     def test_outcome_records_real_review_signal(self):
         self.init()
         code, output = self.cli('outcome', '--review-seconds', '42', '--found-issue',
@@ -495,7 +554,7 @@ class WorkflowTest(unittest.TestCase):
         self.cli('verify', '--', sys.executable, '-c', 'print("ok")')
         state = json.loads((self.root / '.agentproof/task.json').read_text(encoding="utf-8"))
         (self.root / state['checks'][-1]['log']).unlink()
-        self.assertIn('Log MISSING:', self.cli('status', '--brief')[1])
+        self.assertIn('the log is missing, changed or could not be verified', self.cli('status', '--brief')[1])
         data = json.loads(self.cli('status', '--json')[1])
         self.assertFalse(data['checks'][0]['usable'])
         self.assertEqual(data['checks'][0]['execution'], 'PASS')
