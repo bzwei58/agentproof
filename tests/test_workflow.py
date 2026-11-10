@@ -19,6 +19,8 @@ class WorkflowTest(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name).resolve()
         subprocess.run(['git', 'init', '-q', str(self.root)], check=True)
+        subprocess.run(['git', '-C', str(self.root), 'config', 'user.name', 'AgentProof Test'], check=True)
+        subprocess.run(['git', '-C', str(self.root), 'config', 'user.email', 'test@example.invalid'], check=True)
         (self.root / 'app.py').write_text('old\n')
         self.cwd = Path.cwd()
         os.chdir(self.root)
