@@ -2,6 +2,13 @@
 
 All notable changes to AgentProof are documented here.
 
+## 0.6.0 — 2026-11-10
+
+- Add explicit `confirm` and `reject` commands for human acceptance decisions.
+- Bind decisions to the captured workspace, acceptance configuration and linked check receipts.
+- Mark decisions as `STALE_CONFIRMATION` after file edits, log tampering, configuration changes or check reruns.
+- Preserve human notes and rejection reasons in JSON and Markdown reports.
+
 ## 0.5.1 — 2026-11-10
 
 - Add explicit evidence levels: `NO_EVIDENCE`, `PARTIAL_EVIDENCE` and `EVIDENCE_NEEDS_REVIEW`.

@@ -96,6 +96,81 @@ class WorkflowTest(unittest.TestCase):
         self.assertEqual(self.cli('check')[0], 0)
         self.assertEqual(json.loads(self.cli('status', '--json')[1])['acceptance'][0]['status'], 'NEEDS_HUMAN_REVIEW')
 
+    def acceptance_config(self, acceptance=None):
+        config = {'version': 1, 'checks': [self.check(name='tests')]}
+        if acceptance is not None:
+            config['acceptance'] = acceptance
+        (self.root / 'agentproof.json').write_text(json.dumps(config), encoding='utf-8')
+
+    def test_confirm_acceptance_item_records_decision(self):
+        self.acceptance_config([{'id': 'evidence-integrity', 'description': 'Evidence is coherent',
+                                 'checks': ['tests'], 'questions': ['Review the captured output.']}])
+        self.init()
+        self.assertEqual(self.cli('check')[0], 0)
+        code, output = self.cli('confirm', 'evidence-integrity', '--note', 'I reviewed the output.')
+        self.assertEqual(code, 0, output)
+        data = json.loads(self.cli('status', '--json')[1])
+        self.assertEqual(data['acceptance'][0]['status'], 'CONFIRMED')
+        self.assertEqual(data['acceptance'][0]['decision']['note'], 'I reviewed the output.')
+        self.assertIn('I reviewed the output.', self.cli('status')[1])
+
+    def test_reject_acceptance_item_records_reason(self):
+        self.acceptance_config([{'id': 'actionability', 'description': 'Review is actionable',
+                                 'checks': ['tests']}])
+        self.init()
+        self.assertEqual(self.cli('check')[0], 0)
+        code, output = self.cli('reject', 'actionability', '--reason', 'Missing timeout coverage')
+        self.assertEqual(code, 0, output)
+        data = json.loads(self.cli('status', '--json')[1])
+        self.assertEqual(data['acceptance'][0]['status'], 'REJECTED')
+        self.assertEqual(data['acceptance'][0]['decision']['reason'], 'Missing timeout coverage')
+
+    def test_confirmation_becomes_stale_after_file_change(self):
+        self.acceptance_config([{'id': 'evidence', 'description': 'Evidence is current', 'checks': ['tests']}])
+        self.init()
+        self.assertEqual(self.cli('check')[0], 0)
+        self.assertEqual(self.cli('confirm', 'evidence')[0], 0)
+        (self.root / 'app.py').write_text('changed\n')
+        data = json.loads(self.cli('status', '--json')[1])
+        self.assertEqual(data['acceptance'][0]['status'], 'STALE_CONFIRMATION')
+
+    def test_confirmation_becomes_stale_after_log_tampering(self):
+        self.acceptance_config([{'id': 'evidence', 'description': 'Evidence is intact', 'checks': ['tests']}])
+        self.init()
+        self.assertEqual(self.cli('check')[0], 0)
+        self.assertEqual(self.cli('confirm', 'evidence')[0], 0)
+        state = json.loads((self.root / '.agentproof/task.json').read_text(encoding='utf-8'))
+        log = self.root / state['checks'][-1]['log']
+        log.write_text(log.read_text(encoding='utf-8') + 'tampered\n', encoding='utf-8')
+        data = json.loads(self.cli('status', '--json')[1])
+        self.assertEqual(data['acceptance'][0]['status'], 'STALE_CONFIRMATION')
+
+    def test_confirmation_becomes_stale_after_rerun(self):
+        self.acceptance_config([{'id': 'evidence', 'description': 'Evidence is current', 'checks': ['tests']}])
+        self.init()
+        self.assertEqual(self.cli('check')[0], 0)
+        self.assertEqual(self.cli('confirm', 'evidence')[0], 0)
+        self.assertEqual(self.cli('check')[0], 0)
+        data = json.loads(self.cli('status', '--json')[1])
+        self.assertEqual(data['acceptance'][0]['status'], 'STALE_CONFIRMATION')
+
+    def test_unknown_acceptance_id_is_rejected(self):
+        self.acceptance_config([{'id': 'known', 'description': 'Known item', 'checks': ['tests']}])
+        self.init()
+        code, output = self.cli('confirm', 'missing')
+        self.assertEqual(code, 2)
+        self.assertIn('Unknown acceptance id', output)
+        state = json.loads((self.root / '.agentproof/task.json').read_text(encoding='utf-8'))
+        self.assertEqual(state['decisions'], [])
+
+    def test_legacy_task_without_decisions_remains_usable(self):
+        self.init()
+        path = self.root / '.agentproof/task.json'
+        state = json.loads(path.read_text(encoding='utf-8'))
+        state.pop('decisions', None)
+        path.write_text(json.dumps(state), encoding='utf-8')
+        self.assertEqual(self.cli('status', '--json')[0], 0)
+
     def test_interrupted_check_stops_remaining_commands_and_keeps_report(self):
         self.config([self.check(name='interrupted', script='raise SystemExit(130)'),
                      self.check(name='never-run', script='from pathlib import Path; Path("marker").touch()')])

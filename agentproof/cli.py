@@ -302,6 +302,59 @@ def acceptance_assessment(root, latest, workspace_error):
     return result
 
 
+def acceptance_fingerprint(items):
+    """Fingerprint the validated acceptance contract, independent of formatting."""
+    return hashlib.sha256(json.dumps(items, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+
+
+def decision_check_snapshot(check):
+    """Keep the evidence identity a human decision was made against."""
+    result = {key: check.get(key) for key in
+              ("name", "log", "log_sha256", "before", "after", "execution", "workspace", "log_integrity")}
+    tests = check.get("test_results")
+    if tests is not None:
+        result["test_results"] = {key: tests.get(key) for key in ("path", "sha256", "size", "status")}
+    return result
+
+
+def apply_decisions(root, state, acceptance, latest, current_fp):
+    """Overlay explicit human decisions, invalidating them when evidence moves."""
+    try:
+        configured = configured_acceptance(root)
+        config_fp = acceptance_fingerprint(configured)
+    except (OSError, ValueError, json.JSONDecodeError):
+        config_fp = None
+    by_name = {check.get("name"): check for check in latest}
+    decisions = state.setdefault("decisions", [])
+    latest_decisions = {}
+    for decision in decisions:
+        latest_decisions[decision.get("acceptance_id")] = decision
+    for item in acceptance:
+        decision = latest_decisions.get(item["id"])
+        if decision is None:
+            continue
+        expected = {name: decision_check_snapshot(by_name[name]) for name in item.get("checks", [])
+                    if name in by_name}
+        recorded = {entry.get("name"): entry for entry in decision.get("checks", [])}
+        valid = (decision.get("workspace_fingerprint") == current_fp
+                 and decision.get("acceptance_fingerprint") == config_fp
+                 and set(recorded) == set(expected)
+                 and all(recorded[name] == expected[name] for name in expected))
+        if valid:
+            item["status"] = decision.get("status", "STALE_CONFIRMATION")
+            item["decision"] = {key: decision.get(key) for key in
+                                 ("status", "note", "reason", "time") if decision.get(key) is not None}
+            item["next_steps"] = (["Review the recorded confirmation and linked evidence." ]
+                                   if item["status"] == "CONFIRMED" else
+                                   ["Address the rejection reason and confirm again."])
+        else:
+            item["status"] = "STALE_CONFIRMATION"
+            item["decision"] = {key: decision.get(key) for key in
+                                 ("status", "note", "reason", "time") if decision.get(key) is not None}
+            item["next_steps"] = ["Re-run affected checks and review the current evidence, then confirm or reject again."]
+    return acceptance
+
+
 def assessment(root, state):
     workspace_error = None
     try:
@@ -316,9 +369,11 @@ def assessment(root, state):
     checks = [{"command": c["command"], "kind": c.get("kind", "other"),
                "command_template": c.get("command_template", c["command"]),
                "name": c.get("name"), "log": c["log"], "exit_code": c["exit_code"],
+               "log_sha256": c.get("log_sha256"), "before": c.get("before"), "after": c.get("after"),
                **check_evidence(root, c, current_fp)} for c in state["checks"]]
     latest = latest_check_records(checks)
     acceptance = acceptance_assessment(root, latest, workspace_error)
+    acceptance = apply_decisions(root, state, acceptance, latest, current_fp)
     attention = []
     if workspace_error:
         attention.append(f"Workspace comparison UNKNOWN: {workspace_error}. Execution records are retained.")
@@ -383,6 +438,11 @@ def brief_report(data):
                   for item in data["review"]["items"]]
     for item in data.get("acceptance", []):
         lines.append(f"- Acceptance **{item['status']}** `{item['id']}`: {item['description']}")
+        if item.get("decision"):
+            decision = item["decision"]
+            detail = decision.get("note") or decision.get("reason")
+            if detail:
+                lines.append(f"  - Human decision: {detail}")
         lines.extend(f"  - Next: {step}" for step in item["next_steps"])
     lines += ["", "Next: inspect `agentproof diff`, the relevant logs and acceptance scenarios.",
               "No automatic accept/reject decision is made."]
@@ -449,6 +509,18 @@ def report(root, state, data=None, archived=False):
         lines += ["", "## Latest configured run", ""]
         lines += [f"- **{step['status']}** `{step['name']}` — declared kind: {step['kind']}"
                   for step in data["planned_checks"]]
+    if data.get("acceptance"):
+        lines += ["", "## Human acceptance decisions", ""]
+        for item in data["acceptance"]:
+            lines.append(f"- **{item['status']}** `{item['id']}` — {item['description']}")
+            decision = item.get("decision")
+            if decision:
+                if decision.get("note"):
+                    lines.append(f"  - Note: {decision['note']}")
+                if decision.get("reason"):
+                    lines.append(f"  - Reason: {decision['reason']}")
+                if decision.get("time"):
+                    lines.append(f"  - Recorded: {decision['time']}")
     lines += ["", "## Imported session signals", ""]
     for session in state["sessions"]:
         lines += ["- " + "; ".join(f"{k}: {v}" for k, v in session["metrics"].items())]
@@ -690,13 +762,58 @@ def run(args, root):
             with exclude_path.open("a", encoding="utf-8") as f:
                 f.write("\n/.agentproof/\n")
         state = {"version": 1, "goal": args.goal, "created": now(),
-                 "checkpoints": [], "checks": [], "sessions": []}
+                 "checkpoints": [], "checks": [], "sessions": [], "decisions": []}
         snap = checkpoint(root, state, "task start")
         print(f"Task initialized. Baseline: {snap['id']} ({len(snap['files'])} files)")
         return 0
     if not (store / "task.json").exists():
         raise ValueError("Run agentproof init --goal '...' first")
     state = load(store / "task.json")
+    state.setdefault("decisions", [])
+    if args.action in ("confirm", "reject"):
+        try:
+            acceptance_items = configured_acceptance(root)
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            raise ValueError(f"Cannot record a decision: {exc}") from exc
+        item = next((entry for entry in acceptance_items if entry["id"] == args.acceptance_id), None)
+        if item is None:
+            raise ValueError(f"Unknown acceptance id: {args.acceptance_id}")
+        current, omitted = inventory(root)
+        current_fp = fingerprint(current, omitted)
+        latest = latest_check_records([{
+            "command": c["command"], "kind": c.get("kind", "other"),
+            "command_template": c.get("command_template", c["command"]),
+            "name": c.get("name"), "log": c["log"], "log_sha256": c.get("log_sha256"),
+            "before": c.get("before"), "after": c.get("after"), "exit_code": c.get("exit_code"),
+            **check_evidence(root, c, current_fp)} for c in state.get("checks", [])])
+        try:
+            configured = configured_acceptance(root)
+            config_fp = acceptance_fingerprint(configured)
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            raise ValueError(f"Cannot record a decision: {exc}") from exc
+        by_name = {check.get("name"): check for check in latest}
+        decision = {"acceptance_id": args.acceptance_id,
+                    "status": "CONFIRMED" if args.action == "confirm" else "REJECTED",
+                    "time": now(), "workspace_fingerprint": current_fp,
+                    "acceptance_fingerprint": config_fp,
+                    "checks": [decision_check_snapshot(by_name[name]) for name in item.get("checks", [])
+                               if name in by_name]}
+        if args.action == "confirm":
+            decision["note"] = args.note
+        else:
+            decision["reason"] = args.reason
+        state["decisions"].append(decision)
+        save(store / "task.json", state)
+        assessment_data = assessment(root, state)
+        recorded = next(entry for entry in assessment_data["acceptance"] if entry["id"] == args.acceptance_id)
+        print(f"{recorded['status']}: {args.acceptance_id}")
+        if args.action == "confirm" and args.note:
+            print(f"Note: {args.note}")
+        if args.action == "reject":
+            print(f"Reason: {args.reason}")
+        if recorded["status"] == "STALE_CONFIRMATION":
+            print("The decision was recorded, but its evidence is already stale; review and decide again.")
+        return 0
     if args.action == "check":
         planned = [{**c, "status": "NOT_RUN"} for c in checks]
         state.setdefault("check_runs", []).append({"started": now(), "planned": planned})
@@ -934,6 +1051,12 @@ def main(argv=None):
     p = sub.add_parser("review", help="Match AI completion claims to recorded local evidence")
     p.add_argument("--summary", help="Text file containing one completion claim per line")
     p.add_argument("--claim", action="append", help="A completion claim; repeat for multiple claims")
+    p = sub.add_parser("confirm", help="Record a human confirmation for an acceptance item")
+    p.add_argument("acceptance_id")
+    p.add_argument("--note", default="", help="Optional note explaining the confirmation")
+    p = sub.add_parser("reject", help="Record a human rejection for an acceptance item")
+    p.add_argument("acceptance_id")
+    p.add_argument("--reason", required=True, help="Reason the acceptance item was rejected")
     p = sub.add_parser("verify", help="Run a command, capture output and record workspace fingerprints")
     p.add_argument("--kind", choices=["test", "lint", "build", "other"], default="other",
                    help="Declared check type, not a correctness certification")

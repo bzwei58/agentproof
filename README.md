@@ -105,6 +105,16 @@ Optional `acceptance` entries in `agentproof.json` connect a requirement to name
 human questions. Reports distinguish missing evidence from evidence that still needs review;
 they never turn a requirement into an automatic approval. See [configured checks](docs/checks.md).
 
+After reviewing the evidence, record the person's decision explicitly:
+
+```bash
+agentproof confirm timeout-no-double-charge --note "Reviewed the linked tests and diff."
+agentproof reject timeout-no-double-charge --reason "The lost-response scenario is not covered."
+```
+
+Decisions are tied to the current files, acceptance configuration and linked check receipts.
+If any of those change, the report shows `STALE_CONFIRMATION` and asks for a new decision.
+
 ### Captured evidence
 
 - SHA-256 fingerprints and modes of captured files, plus full file checkpoints.

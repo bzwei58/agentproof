@@ -120,3 +120,20 @@ linked evidence is `MISSING_EVIDENCE`; an item whose checks are usable is still
 `NEEDS_HUMAN_REVIEW` and lists its questions. It never becomes an automatic approval.
 Invalid mappings are rejected before configured commands run. Older configurations without
 `acceptance` remain valid.
+
+### Recording the human decision
+
+After inspecting the report, use the acceptance id to record the decision:
+
+```bash
+agentproof confirm timeout-no-double-charge --note "Reviewed the diff and test output."
+agentproof reject timeout-no-double-charge --reason "Missing the server-success/client-timeout case."
+```
+
+`confirm` records a `CONFIRMED` decision and `reject` records `REJECTED`. The note is
+optional for confirmation; a rejection reason is required. Each record includes a workspace
+fingerprint, the acceptance configuration fingerprint and the linked check receipt identity.
+If files, the acceptance mapping, a linked log or structured result changes, or the linked check
+is run again, the old decision becomes `STALE_CONFIRMATION`. This requests a new review; it is
+not an automatic correctness judgement. The full decision history remains in `task.json` and
+the latest decision is shown in `status`, `status --json` and `report`.
