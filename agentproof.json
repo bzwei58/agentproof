@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "checks": [
+    {
+      "name": "unit-tests",
+      "kind": "test",
+      "command": ["python", "-m", "unittest", "discover", "-s", "tests", "-v"],
+      "timeout": 300
+    }
+  ],
+  "acceptance": [
+    {
+      "id": "evidence-integrity",
+      "description": "A completed check remains linked to the current captured workspace and intact log",
+      "checks": ["unit-tests"],
+      "questions": [
+        "Does the report show the check matched the current files?",
+        "Is the command log present and unchanged?"
+      ]
+    },
+    {
+      "id": "review-actionability",
+      "description": "The handoff report identifies evidence gaps and concrete human review questions",
+      "checks": ["unit-tests"],
+      "questions": [
+        "Did the report tell the reviewer what still needs confirmation?",
+        "Did it reduce the time spent finding the relevant log or diff?"
+      ]
+    }
+  ]
+}
